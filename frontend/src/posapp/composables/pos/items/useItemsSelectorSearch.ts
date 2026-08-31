@@ -15,6 +15,9 @@ type SearchDeps = {
 	runLimitSearch?: (_term: string) => Promise<unknown> | unknown;
 	clearHighlightedItem?: () => void;
 	resolveItemByBarcode?: (_code: string) => any;
+	isAutoAddEnabled?: () => boolean;
+	getDisplayedItems?: () => any[];
+	addItemToCart?: (_item: any) => Promise<unknown> | unknown;
 };
 
 export const useItemsSelectorSearch = ({
@@ -27,6 +30,9 @@ export const useItemsSelectorSearch = ({
 	runLimitSearch,
 	clearHighlightedItem,
 	resolveItemByBarcode,
+	isAutoAddEnabled,
+	getDisplayedItems,
+	addItemToCart,
 }: SearchDeps) => {
 	const getVm = (): any => (typeof getVM === "function" ? getVM() : null);
 
@@ -284,6 +290,59 @@ export const useItemsSelectorSearch = ({
 		}
 	};
 
+	const getAutoAddEnabled = (_vm: any): boolean => {
+		if (typeof isAutoAddEnabled === "function") {
+			const result = isAutoAddEnabled();
+			console.log("[AutoAdd] isAutoAddEnabled closure result:", result);
+			return result;
+		}
+		console.log("[AutoAdd] isAutoAddEnabled closure not provided — returning false");
+		return false;
+	};
+
+	const tryAutoAddSingleResult = async (vm: any): Promise<boolean> => {
+		const enabled = getAutoAddEnabled(vm);
+		console.log("[AutoAdd] tryAutoAddSingleResult called. enabled:", enabled);
+		if (!enabled) return false;
+
+		if (typeof vm.$nextTick === "function") {
+			await vm.$nextTick();
+		}
+
+		const searchInput = getCurrentSearchInput(vm);
+		console.log("[AutoAdd] searchInput:", searchInput);
+		if (!searchInput) return false;
+
+		// Use injected closure first (avoids Vue proxy ref-unwrapping issues),
+		// fall back to vm.displayedItems for backwards compatibility.
+		const displayed: any[] =
+			typeof getDisplayedItems === "function"
+				? getDisplayedItems()
+				: Array.isArray(vm.displayedItems)
+					? vm.displayedItems
+					: [];
+		console.log("[AutoAdd] displayed items count:", displayed.length);
+		if (displayed.length !== 1) return false;
+
+		const item = { ...displayed[0] };
+		console.log("[AutoAdd] auto-adding item:", item?.item_code || item);
+		if (typeof addItemToCart === "function") {
+			await addItemToCart(item);
+		} else if (typeof vm.add_item === "function") {
+			await vm.add_item(item, { suppressNegativeWarning: true });
+		} else {
+			console.warn("[AutoAdd] no addItemToCart or vm.add_item available");
+		}
+
+		if (typeof setSearchInput === "function") {
+			setSearchInput("");
+		} else {
+			void vm.clearSearch?.();
+		}
+		console.log("[AutoAdd] item added and search cleared");
+		return true;
+	};
+
 	const _performSearch = async () => {
 		const vm = getVm();
 		if (!vm) return;
@@ -363,12 +422,14 @@ export const useItemsSelectorSearch = ({
 					}
 				}
 			}
+			await tryAutoAddSingleResult(vm);
 		} else if (hasStorageAvailable(vm)) {
 			const loadVisibleItems = getVisibleItemsLoader(vm);
 			if (loadVisibleItems) {
 				await loadVisibleItems(true);
 			}
 			triggerEnterEvent(vm);
+			await tryAutoAddSingleResult(vm);
 		} else {
 			// When local storage is disabled, always fetch items
 			// from the server so searches aren't limited to the
@@ -392,6 +453,7 @@ export const useItemsSelectorSearch = ({
 					}
 				}, 300);
 			}
+			await tryAutoAddSingleResult(vm);
 		}
 
 		// Clear the input only when triggered via scanner

@@ -597,6 +597,77 @@ watch(
 	{ flush: "post" },
 );
 
+let autoAddTimeout: ReturnType<typeof setTimeout> | null = null;
+watch(
+	displayedItems,
+	(items) => {
+		const rawTerm = search_input.value || first_search.value;
+		const term = (typeof rawTerm === "string" ? rawTerm : "").trim();
+		
+		if (autoAddTimeout) {
+			clearTimeout(autoAddTimeout);
+			autoAddTimeout = null;
+		}
+
+		if (!term) return;
+
+		const autoAdd = parseBooleanSetting(pos_profile.value?.auto_add_item_to_cart);
+		if (!autoAdd) return;
+
+		// Find if there is an EXACT match for item_code, barcode, serial no, or batch no
+		let matchedSerialNo = "";
+		let matchedBatchNo = "";
+		const exactMatchItem = items.find((item: any) => {
+			const t = term.toLowerCase();
+			if (item?.item_code?.toLowerCase() === t) return true;
+			if (item?.barcode?.toLowerCase() === t) return true;
+
+			if (Array.isArray(item?.item_barcode) && item.item_barcode.some((b: any) => b?.barcode?.toLowerCase() === t)) return true;
+			if (Array.isArray(item?.barcodes) && item.barcodes.some((b: any) => String(b).toLowerCase() === t)) return true;
+			
+			if (Array.isArray(item?.serial_no_data)) {
+				const serialMatch = item.serial_no_data.find((s: any) => s?.serial_no?.toLowerCase() === t);
+				if (serialMatch) {
+					matchedSerialNo = serialMatch.serial_no;
+					if (serialMatch.batch_no) matchedBatchNo = serialMatch.batch_no;
+					return true;
+				}
+			}
+			if (Array.isArray(item?.batch_no_data)) {
+				const batchMatch = item.batch_no_data.find((b: any) => b?.batch_no?.toLowerCase() === t);
+				if (batchMatch) {
+					matchedBatchNo = batchMatch.batch_no;
+					return true;
+				}
+			}
+			return false;
+		});
+
+		const executeAutoAdd = async (itemToAdd: any) => {
+			const currentRaw = search_input.value || first_search.value;
+			const currentTerm = (typeof currentRaw === "string" ? currentRaw : "").trim();
+			
+			if (currentTerm === term) {
+				console.log("[AutoAdd] watcher triggered. Adding item:", itemToAdd?.item_code);
+				if (matchedSerialNo) itemToAdd.to_set_serial_no = matchedSerialNo;
+				if (matchedBatchNo) itemToAdd.to_set_batch_no = matchedBatchNo;
+				await add_item({ ...itemToAdd }, { suppressNegativeWarning: true });
+				search_input.value = "";
+				first_search.value = "";
+			}
+		};
+
+		if (exactMatchItem) {
+			// If we have an exact match, instantly add it, even if there are other partial matches
+			void executeAutoAdd(exactMatchItem);
+		} else if (items.length === 1) {
+			// If no exact match, but only 1 partial match is left, wait 500ms to see if they finish typing
+			autoAddTimeout = setTimeout(() => executeAutoAdd(items[0]), 500);
+		}
+	},
+	{ flush: "post" }
+);
+
 const pharmacySearchField = ref("all");
 // Counter Grid must expose unavailable requested medicines so Enter can offer
 // same-generic in-stock alternates. Classic item browsing keeps its own policy.
@@ -848,6 +919,9 @@ const itemsSelectorSearch = useItemsSelectorSearch({
 		),
 	clearHighlightedItem: () => itemSelection.clearHighlightedItem(),
 	resolveItemByBarcode: (code) => resolveItemByBarcode(items.value, code),
+	isAutoAddEnabled: () => parseBooleanSetting(pos_profile.value?.auto_add_item_to_cart),
+	getDisplayedItems: () => displayedItems.value,
+	addItemToCart: (item) => add_item(item, { suppressNegativeWarning: true }),
 });
 const itemsSelectorSettings = useItemsSelectorSettings({ getVM: () => settingsContext, itemSync });
 const itemsSelectorFocus = useItemsSelectorFocus({
