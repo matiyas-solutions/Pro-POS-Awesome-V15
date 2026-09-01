@@ -17,6 +17,11 @@ class CustomPOSInvoiceMergeLog(ERPNextPOSInvoiceMergeLog):
         if getattr(invoice, "is_return", 0):
             self._normalize_return_payments(invoice)
 
+        for item in invoice.get("items", []):
+            if item.serial_and_batch_bundle:
+                item.serial_no = None
+                item.batch_no = None
+
         return invoice
 
     def _normalize_return_payments(self, invoice) -> None:
