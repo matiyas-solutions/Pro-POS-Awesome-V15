@@ -9,6 +9,19 @@ from posawesome.posawesome.doctype.pos_closing_shift.closing_processing.data imp
 )
 
 
+def resolve_payment_currency(payment_row, invoice_currency, company_currency=None):
+    for fieldname in (
+        "posa_payment_currency",
+        "currency",
+        "account_currency",
+        "payment_currency",
+    ):
+        value = payment_row.get(fieldname)
+        if value:
+            return value
+    return invoice_currency or company_currency
+
+
 @frappe.whitelist()
 def get_closing_shift_overview(pos_opening_shift):
     """Return invoice and payment totals for the provided POS Opening Shift."""
@@ -113,18 +126,6 @@ def get_closing_shift_overview(pos_opening_shift):
                 rate = flt(conversion_rate)
             if rate:
                 container[key]["exchange_rates"].add(rate)
-
-    def resolve_payment_currency(payment_row, invoice_currency):
-        for fieldname in (
-            "posa_payment_currency",
-            "currency",
-            "account_currency",
-            "payment_currency",
-        ):
-            value = payment_row.get(fieldname)
-            if value:
-                return value
-        return invoice_currency or company_currency
 
     shift_invoice_names = {invoice.get("name") for invoice in invoices}
     invoice_shift_link_field_cache = {}
@@ -466,7 +467,7 @@ def get_closing_shift_overview(pos_opening_shift):
 
         for payment in invoice.get("payments", []):
             mode = payment.get("mode_of_payment")
-            payment_currency = resolve_payment_currency(payment, invoice_currency)
+            payment_currency = resolve_payment_currency(payment, invoice_currency, company_currency)
             amount = flt(payment.get("posa_original_amount") or payment.get("amount") or 0)
             base_amount = get_base_value(payment, "amount", "base_amount", conversion_rate)
             accumulate_payment(
@@ -866,7 +867,7 @@ def get_payment_reconciliation_details(closing_shift_doc):
         net_breakdown[currency] += flt(invoice_doc.get("net_total") or 0)
 
         for payment in invoice_doc.get("payments", []):
-            payment_currency = resolve_payment_currency(payment, currency)
+            payment_currency = resolve_payment_currency(payment, currency, company_currency)
             original_amount = payment.get("posa_original_amount")
             if original_amount in (None, ""):
                 original_amount = payment.get("amount")
