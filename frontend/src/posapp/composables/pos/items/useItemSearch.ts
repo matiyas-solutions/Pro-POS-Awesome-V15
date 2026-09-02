@@ -22,6 +22,7 @@ type SearchItem = {
 	base_price_list_rate?: number | string;
 	variant_of?: string;
 	_search_index?: string;
+	_serial_index?: string;
 	[key: string]: unknown;
 };
 
@@ -122,8 +123,12 @@ export function useItemSearch() {
 				if (Array.isArray(item.barcodes)) {
 					item.barcodes.forEach((b) => pushValue(b));
 				}
-				if (Array.isArray(item.serial_no_data)) {
-					item.serial_no_data.forEach((s) => pushValue(s?.serial_no));
+				if (Array.isArray(item.serial_no_data) && term.includes('pm')) {
+					item.serial_no_data.forEach((s) => {
+						if (s?.serial_no && s.serial_no.toUpperCase().includes('PM-')) {
+							pushValue(s.serial_no);
+						}
+					});
 				}
 				if (Array.isArray(item.batch_no_data)) {
 					item.batch_no_data.forEach((b) => pushValue(b?.batch_no));
@@ -242,18 +247,30 @@ export function useItemSearch() {
 			// 1. Search Filter
 			if (needsLocalSearch) {
 				let matches = false;
+				const hasPm = term.includes("pm");
 				if (item._search_index) {
+					const checkIndex = hasPm && item._serial_index 
+						? item._search_index + " " + item._serial_index 
+						: item._search_index;
 					matches = activeTerms.every((t) =>
-						item._search_index!.includes(t),
+						checkIndex.includes(t),
 					);
 				} else {
-					// Fallback
+					let serialsStr = "";
+					if (hasPm) {
+						if (item._serial_index) {
+							serialsStr = " " + item._serial_index;
+						} else if (Array.isArray(item.serial_no_data)) {
+							serialsStr = " " + item.serial_no_data.map(s => s?.serial_no).filter(Boolean).join(" ");
+						}
+					}
 					const rawIndex = (
 						(item.item_code || "") +
 						" " +
 						(item.item_name || "") +
 						" " +
-						(item.barcode || "")
+						(item.barcode || "") +
+						serialsStr
 					).toLowerCase();
 					matches = activeTerms.every((t) => rawIndex.includes(t));
 				}

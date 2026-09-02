@@ -625,7 +625,7 @@ watch(
 			if (Array.isArray(item?.item_barcode) && item.item_barcode.some((b: any) => b?.barcode?.toLowerCase() === t)) return true;
 			if (Array.isArray(item?.barcodes) && item.barcodes.some((b: any) => String(b).toLowerCase() === t)) return true;
 			
-			if (Array.isArray(item?.serial_no_data)) {
+			if (Array.isArray(item?.serial_no_data) && t.includes('pm-')) {
 				const serialMatch = item.serial_no_data.find((s: any) => s?.serial_no?.toLowerCase() === t);
 				if (serialMatch) {
 					matchedSerialNo = serialMatch.serial_no;

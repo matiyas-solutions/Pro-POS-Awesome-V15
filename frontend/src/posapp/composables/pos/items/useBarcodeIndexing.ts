@@ -78,9 +78,11 @@ export const indexItemInBarcodeIndex = (
 		item.barcodes.forEach((barcode) => registerCode(map, item, barcode));
 	}
 	if (Array.isArray(item.serial_no_data)) {
-		item.serial_no_data.forEach((serial) =>
-			registerCode(map, item, serial?.serial_no),
-		);
+		item.serial_no_data.forEach((serial) => {
+			if (serial?.serial_no && serial.serial_no.toUpperCase().includes('PM-')) {
+				registerCode(map, item, serial.serial_no);
+			}
+		});
 	}
 	if (Array.isArray(item.batch_no_data)) {
 		item.batch_no_data.forEach((batch) =>
