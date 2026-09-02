@@ -158,9 +158,13 @@ export function useItemsSearch() {
 			);
 
 			if (includeSerial && Array.isArray(item.serial_no_data)) {
-				item.serial_no_data.forEach((s: any) =>
-					searchFields.push(s?.serial_no),
-				);
+				const serials = item.serial_no_data
+					.map((s: any) => s?.serial_no)
+					.filter(Boolean)
+					.map((field) => normalizeSearchText(field));
+				if (serials.length > 0) {
+					item._serial_index = serials.join(" ");
+				}
 			}
 
 			if (includeBatch && Array.isArray(item.batch_no_data)) {
@@ -216,8 +220,14 @@ export function useItemsSearch() {
 				const tokens = Array.isArray(item._search_tokens)
 					? item._search_tokens
 					: tokenizeSearchText(item._search_index);
+				
+				const hasPm = searchTerm.includes("pm");
+				const checkIndex = hasPm && item._serial_index 
+					? item._search_index + " " + item._serial_index 
+					: item._search_index;
+					
 				return searchTerms.every((searchToken) => {
-					if (item._search_index!.includes(searchToken)) {
+					if (checkIndex.includes(searchToken)) {
 						return true;
 					}
 					return tokens.some((token) =>
@@ -288,7 +298,12 @@ export function useItemsSearch() {
 		) {
 			return 650;
 		}
-		if (item._search_index?.includes(searchTerm)) return 500;
+		
+		const checkIndex = searchTerm.includes('pm') && item._serial_index 
+			? item._search_index + " " + item._serial_index 
+			: item._search_index;
+			
+		if (checkIndex?.includes(searchTerm)) return 500;
 		return 100;
 	};
 
