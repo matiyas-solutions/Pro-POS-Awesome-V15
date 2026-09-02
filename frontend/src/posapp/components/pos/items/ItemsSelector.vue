@@ -658,11 +658,13 @@ watch(
 		};
 
 		if (exactMatchItem) {
-			// If we have an exact match, instantly add it, even if there are other partial matches
-			void executeAutoAdd(exactMatchItem);
-		} else if (items.length === 1) {
-			// If no exact match, but only 1 partial match is left, wait 500ms to see if they finish typing
-			autoAddTimeout = setTimeout(() => executeAutoAdd(items[0]), 500);
+			if (scannerInput.searchFromScanner?.value) {
+				// If we have an exact match from scanner, instantly add it
+				void executeAutoAdd(exactMatchItem);
+			} else {
+				// If manual typing, wait 500ms to allow typing longer codes (e.g. PM-11241 instead of PM-1124)
+				autoAddTimeout = setTimeout(() => executeAutoAdd(exactMatchItem), 500);
+			}
 		}
 	},
 	{ flush: "post" }
