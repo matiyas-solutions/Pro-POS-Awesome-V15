@@ -1027,6 +1027,24 @@ const add_item = async (item, optionsOrQty: any = {}) => {
 			requestedQty === "" || requestedQty == null ? 1 : Math.abs(parseFloat(requestedQty) || 1);
 
 		item = { ...item };
+		
+		// If manually clicked while search term is an exact serial/batch match, carry it over
+		const rawTerm = search_input.value || first_search.value;
+		const t = (typeof rawTerm === "string" ? rawTerm : "").trim().toLowerCase();
+		if (t && !item.to_set_serial_no && !item.to_set_batch_no) {
+			if (Array.isArray(item.serial_no_data) && t.includes("pm-")) {
+				const serialMatch = item.serial_no_data.find((s: any) => s?.serial_no?.toLowerCase() === t);
+				if (serialMatch) {
+					item.to_set_serial_no = serialMatch.serial_no;
+					if (serialMatch.batch_no) item.to_set_batch_no = serialMatch.batch_no;
+				}
+			} else if (Array.isArray(item.batch_no_data)) {
+				const batchMatch = item.batch_no_data.find((b: any) => b?.batch_no?.toLowerCase() === t);
+				if (batchMatch) {
+					item.to_set_batch_no = batchMatch.batch_no;
+				}
+			}
+		}
 		if (parseBooleanSetting(item.retailmind_locked_for_sale)) {
 			toastStore.show({
 				title: __("Item is locked for sale"),
