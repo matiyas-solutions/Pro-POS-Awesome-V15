@@ -248,6 +248,9 @@
 			:reserve-bottom-dock-space="context === 'pos' && responsive.windowWidth.value < 1100"
 			@open-offers="uiStore.setActiveView('offers')"
 			@open-coupons="uiStore.setActiveView('coupons')"
+			:fitness-goals="fitnessGoals"
+			:fitness-goal-options="fitnessGoalOptions"
+			v-model:selected-goal="selectedGoal"
 		/>
 
 		<!-- New Item Dialog -->
@@ -487,6 +490,57 @@ const alternateOrigin = ref<"search" | "cart" | null>(null);
 const alternateSource = ref<any>(null);
 let counterSearchToken = 0;
 
+const fitnessGoals = ref<any[]>([]);
+const selectedGoal = ref<string>("");
+
+const refreshFitnessGoals = () => {
+	if (typeof window === "undefined" || !window.frappe) return;
+	window.frappe.call({
+		method: "proteinmart.api.get_goal_recommendations",
+		callback: function (r: any) {
+			const nextGoals = Array.isArray(r?.message) ? r.message : [];
+			fitnessGoals.value = nextGoals;
+			if (selectedGoal.value && !nextGoals.some((g: any) => g.goal === selectedGoal.value)) {
+				selectedGoal.value = "";
+			}
+		},
+	});
+};
+
+const handleFitnessGoalWindowFocus = () => refreshFitnessGoals();
+const handleFitnessGoalVisibilityChange = () => {
+	if (typeof document !== "undefined" && !document.hidden) refreshFitnessGoals();
+};
+
+// computed options for v-select
+const fitnessGoalOptions = computed(() => {
+	const opts = [{ text: __("All Items"), value: "" }];
+	return opts.concat(fitnessGoals.value.map((g: any) => ({ text: g.goal, value: g.goal })));
+});
+
+onMounted(() => {
+	if (typeof window !== "undefined" && window.frappe) {
+		window.frappe.call({
+			method: "proteinmart.api.get_goal_recommendations",
+			callback: function(r: any) {
+				if (r.message) {
+					fitnessGoals.value = r.message;
+				}
+			}
+		});
+	}
+});
+
+// Refresh displayed items and layout when goal changes
+watch(selectedGoal, async (goal) => {
+	// clear highlighted item and reload visible items so the view updates
+	itemSelection.clearHighlightedItem();
+	await nextTick();
+	loadVisibleItems(true);
+	await nextTick();
+	itemSelection.highlightFirstItem();
+});
+
 // Settings Refs
 const hide_qty_decimals = ref(false);
 const hide_zero_rate_items = ref(false);
@@ -571,7 +625,15 @@ const {
 } = itemsIntegration;
 
 const displayedItems = computed(() => {
-	const baseItems = Array.isArray(filteredItems.value) ? filteredItems.value : [];
+	let baseItems = Array.isArray(filteredItems.value) ? filteredItems.value : [];
+	
+	if (selectedGoal.value) {
+		const goalData = fitnessGoals.value.find((g: any) => g.goal === selectedGoal.value);
+		if (goalData && goalData.items) {
+			baseItems = baseItems.filter((item: any) => goalData.items.includes(item.item_code));
+		}
+	}
+
 	const rawTerm = first_search.value;
 	const term = (typeof rawTerm === "string" ? rawTerm : "").trim().toLowerCase();
 	const searchAlreadyApplied = term.length >= 3 && filteredItemsSearchTerm.value === term;
@@ -1643,6 +1705,12 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
 	unbindItemCatalogRecoveryListeners();
+	if (typeof window !== "undefined") {
+		window.removeEventListener("focus", handleFitnessGoalWindowFocus);
+	}
+	if (typeof document !== "undefined") {
+		document.removeEventListener("visibilitychange", handleFitnessGoalVisibilityChange);
+	}
 	if (pharmacyNavigationFrame !== null) {
 		window.cancelAnimationFrame(pharmacyNavigationFrame);
 		pharmacyNavigationFrame = null;
