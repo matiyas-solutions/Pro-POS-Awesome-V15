@@ -15,6 +15,22 @@
 					@update:model-value="$emit('update:modelValue', $event)"
 				></v-select>
 			</v-col>
+			<!-- Fitness goal select (optional) -->
+			<v-col cols="12" class="mb-2">
+				<v-select
+					:items="fitnessGoalOptions"
+					:model-value="selectedGoal"
+					@update:model-value="$emit('update:selectedGoal', $event)"
+					:label="frappe._('Fitness goal')"
+					density="compact"
+					variant="solo"
+					hide-details
+					item-title="text"
+					item-value="value"
+					style="width:100%"
+				/>
+			</v-col>
+			
 			<v-col cols="12" class="mb-2" v-if="posProfile.posa_enable_price_list_dropdown !== false">
 				<v-text-field
 					density="compact"
@@ -81,9 +97,12 @@ defineProps({
 	offersCount: { type: Number, default: 0 },
 	couponsCount: { type: Number, default: 0 },
 	reserveBottomDockSpace: { type: Boolean, default: false },
+	fitnessGoals: { type: Array, default: () => [] },
+	fitnessGoalOptions: { type: Array, default: () => [] },
+	selectedGoal: { type: [String, Number], default: "" },
 });
 
-defineEmits(["update:modelValue", "update:itemsView", "open-offers", "open-coupons"]);
+defineEmits(["update:modelValue", "update:itemsView", "open-offers", "open-coupons", "update:selectedGoal"]);
 </script>
 
 <style scoped>
@@ -165,5 +184,12 @@ defineEmits(["update:modelValue", "update:itemsView", "open-offers", "open-coupo
 		padding: var(--dynamic-xs) !important;
 		position: static;
 	}
+}
+
+/* optional basic layout for the inserted control */
+.item-action-toolbar__fitness {
+	display: flex;
+	align-items: center;
+	margin-left: 12px;
 }
 </style>
