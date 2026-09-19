@@ -61,6 +61,9 @@ import time
 from contextlib import contextmanager
 from frappe.utils import money_in_words
 from frappe.utils.background_jobs import enqueue
+from posawesome.posawesome.overrides.return_serial_batch import apply_return_serial_batch_patch
+
+apply_return_serial_batch_patch()
 
 
 LEDGER_DOCTYPE = "POS Invoice Submission Ledger"

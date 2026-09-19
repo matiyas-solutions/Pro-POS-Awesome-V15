@@ -107,6 +107,8 @@ export const selectSerialsForBatchAllocations = (
 		const candidates = serialRows
 			.filter(
 				(row: any) =>
+					!row?.batch_no ||
+					!String(row.batch_no).trim() ||
 					String(row?.batch_no || "") === allocation.batchNo,
 			)
 			.map((row: any) => String(row.serial_no || "").trim())
@@ -120,7 +122,9 @@ export const selectSerialsForBatchAllocations = (
 		const preserved = normalizedCurrent.filter((serial) => {
 			const row: any = rowBySerial.get(serial);
 			return (
-				String(row?.batch_no || "") === allocation.batchNo &&
+				(!row?.batch_no ||
+					!String(row.batch_no).trim() ||
+					String(row?.batch_no || "") === allocation.batchNo) &&
 				candidateSet.has(serial) &&
 				!selectedSet.has(serial)
 			);
@@ -147,7 +151,7 @@ const serialsForBatch = (item: any, serials: string[], batchNo: string) => {
 	const serialRows = Array.isArray(item?.serial_no_data)
 		? item.serial_no_data
 		: [];
-	const serialBatch = new Map(
+	const serialBatch = new Map<string, string>(
 		serialRows
 			.filter((row: any) => row?.serial_no)
 			.map((row: any) => [
@@ -156,7 +160,8 @@ const serialsForBatch = (item: any, serials: string[], batchNo: string) => {
 			]),
 	);
 	return serials.filter((serial) => {
-		const knownBatch = serialBatch.get(serial);
+		const knownBatch = String(serialBatch.get(serial) || "").trim();
+		if (!knownBatch) return true;
 		return knownBatch === batchNo;
 	});
 };

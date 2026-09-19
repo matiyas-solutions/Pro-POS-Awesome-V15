@@ -397,6 +397,27 @@ export function useInvoiceItems(invoiceType: Ref<string>) {
 
 		if (field_name === "qty") {
 			refreshQuantityLimitState(item);
+			if (item.has_serial_no && Array.isArray(item.serial_no_selected)) {
+				const targetStockQty = Math.abs(
+					Math.trunc(
+						Number(item.qty || 0) *
+							Number(item.conversion_factor || 1),
+					),
+				);
+				if (
+					targetStockQty > 0 &&
+					item.serial_no_selected.length > targetStockQty
+				) {
+					item.serial_no_selected = item.serial_no_selected.slice(
+						0,
+						targetStockQty,
+					);
+					item.serial_no = item.serial_no_selected.join("\n");
+					item.serial_no_selected_count =
+						item.serial_no_selected.length;
+					item._batch_serial_assignment_source = "manual";
+				}
+			}
 		}
 
 		if (typeof calc_stock_qty === "function")

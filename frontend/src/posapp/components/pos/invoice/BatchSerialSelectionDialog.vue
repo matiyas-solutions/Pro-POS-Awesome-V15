@@ -117,6 +117,12 @@
 
 				<div v-if="item?.has_serial_no" class="text-caption mt-1">
 					{{ workingSerials.length }} / {{ requiredQuantity }} {{ __("selected") }}
+					<span
+						v-if="isReturn && workingSerials.length > 0 && workingSerials.length < requiredQuantity"
+						class="text-info ml-1"
+					>
+						({{ __("Quantity will be updated to") }} -{{ workingSerials.length }})
+					</span>
 				</div>
 			</v-card-text>
 
@@ -220,7 +226,40 @@ const usedSerialsElsewhere = computed(() => {
 	return used;
 });
 
+const isReturn = computed(() =>
+	Boolean(props.isReturnInvoice || props.item?.is_return || (props.item?.qty ?? 0) < 0),
+);
+
 const serialOptions = computed(() => {
+	if (isReturn.value && Array.isArray(props.item?.returnable_serial_nos) && props.item.returnable_serial_nos.length) {
+		const allowedSet = new Set(props.item.returnable_serial_nos.map((s: any) => String(s).trim()));
+		const rows = Array.isArray(props.item?.serial_no_data) ? props.item.serial_no_data : [];
+		const matchedSerials = new Set<string>();
+		const result: any[] = [];
+		for (const row of rows) {
+			const serial = String(row?.serial_no || "").trim();
+			if (allowedSet.has(serial) && !usedSerialsElsewhere.value.has(serial)) {
+				result.push({
+					...row,
+					batch_no: row.batch_no || props.item?.batch_no || null,
+				});
+				matchedSerials.add(serial);
+			}
+		}
+		for (const serial of props.item.returnable_serial_nos) {
+			const sn = String(serial || "").trim();
+			if (sn && !matchedSerials.has(sn) && !usedSerialsElsewhere.value.has(sn)) {
+				result.push({
+					serial_no: sn,
+					warehouse: props.item?.warehouse,
+					batch_no: props.item?.batch_no || null,
+				});
+				matchedSerials.add(sn);
+			}
+		}
+		return result;
+	}
+
 	const rows = Array.isArray(props.item?.serial_no_data) ? props.item.serial_no_data : [];
 	return rows.filter((row: any) => {
 		const serial = String(row?.serial_no || "").trim();
@@ -233,6 +272,9 @@ const serialOptions = computed(() => {
 });
 
 const serialSelectionHint = computed(() => {
+	if (isReturn.value && Array.isArray(props.item?.returnable_serial_nos) && props.item.returnable_serial_nos.length) {
+		return __("Only serial numbers sold on the original invoice can be returned.");
+	}
 	if (props.item?.has_batch_no && !selectedBatchNos.value.size) {
 		return __("Allocate one or more batches first to filter their serial numbers.");
 	}
@@ -249,9 +291,15 @@ const initializeDraft = () => {
 	if (currentBatch) {
 		workingAllocations.value[currentBatch] = requiredQuantity.value;
 	}
-	workingSerials.value = getSelectedSerials(props.item);
+	let initialSerials = getSelectedSerials(props.item);
+	if (!initialSerials.length && isReturn.value && Array.isArray(props.item?.returnable_serial_nos)) {
+		initialSerials = [...props.item.returnable_serial_nos];
+	}
+	workingSerials.value = initialSerials;
 	errorMessage.value = "";
-	if (!currentBatch || (!props.isReturnInvoice && !allocationFitsAvailability.value)) {
+	if (isReturn.value) {
+		syncSerialSelection();
+	} else if (!currentBatch || (!props.isReturnInvoice && !allocationFitsAvailability.value)) {
 		autoAllocate();
 	} else {
 		syncSerialSelection();
@@ -266,7 +314,10 @@ const allocationFitsAvailability = computed(() =>
 );
 
 const syncSerialSelection = () => {
-	if (props.item?.has_serial_no && props.item?.has_batch_no) {
+	if (isReturn.value && Array.isArray(props.item?.returnable_serial_nos) && props.item.returnable_serial_nos.length) {
+		const validSerials = new Set(serialOptions.value.map((row: any) => row.serial_no));
+		workingSerials.value = workingSerials.value.filter((serial) => validSerials.has(serial));
+	} else if (props.item?.has_serial_no && props.item?.has_batch_no) {
 		workingSerials.value = selectSerialsForBatchAllocations(
 			props.item,
 			allocations.value,
@@ -325,21 +376,33 @@ const save = () => {
 		errorMessage.value = `Serial ${duplicateInCart} is already selected on another cart line`;
 		return;
 	}
+
+	let effectiveAllocations = allocations.value;
+	if (isReturn.value && props.item?.has_serial_no && workingSerials.value.length > 0) {
+		const serialCount = workingSerials.value.length;
+		if (props.item?.has_batch_no) {
+			const currentBatch = String(props.item?.batch_no || allocations.value[0]?.batchNo || "").trim();
+			if (currentBatch) {
+				effectiveAllocations = [{ batchNo: currentBatch, stockQty: serialCount }];
+			}
+		}
+	}
+
 	const issues = validateBatchSerialSelection(
 		props.item,
 		{
-			allocations: allocations.value,
+			allocations: effectiveAllocations,
 			serials: workingSerials.value,
 		},
-		{ isReturnInvoice: props.isReturnInvoice },
+		{ isReturnInvoice: props.isReturnInvoice, allowPartialReturn: isReturn.value },
 	);
 	if (issues.length) {
 		errorMessage.value = issues[0]?.message || __("Invalid batch or serial selection");
 		return;
 	}
 	emit("save", {
-		batchNo: allocations.value[0]?.batchNo || null,
-		allocations: allocations.value,
+		batchNo: effectiveAllocations[0]?.batchNo || null,
+		allocations: effectiveAllocations,
 		serials: [...workingSerials.value],
 	});
 	dialogVisible.value = false;

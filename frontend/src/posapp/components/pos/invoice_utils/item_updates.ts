@@ -71,8 +71,24 @@ export async function update_items_details(context: any, items: any[]) {
 				item.has_batch_no = updated_item.has_batch_no;
 				item.has_serial_no = updated_item.has_serial_no;
 				item.allow_negative_stock = updated_item.allow_negative_stock;
-				item.batch_no_data = updated_item.batch_no_data;
-				item.serial_no_data = updated_item.serial_no_data;
+				const isReturnItem = Boolean(
+					(context.invoice_doc && context.invoice_doc.is_return) ||
+					(item.qty ?? 0) < 0
+				);
+				if (isReturnItem && Array.isArray(item.returnable_serial_nos) && item.returnable_serial_nos.length) {
+					const returnableList = item.returnable_serial_nos.map((sn: string) => ({
+						serial_no: sn,
+						warehouse: item.warehouse || context.pos_profile?.warehouse,
+						batch_no: item.batch_no || updated_item?.batch_no || null,
+					}));
+					const existingSet = new Set(returnableList.map((r: any) => r.serial_no));
+					const incoming = Array.isArray(updated_item.serial_no_data)
+						? updated_item.serial_no_data.filter((r: any) => !existingSet.has(r?.serial_no))
+						: [];
+					item.serial_no_data = [...returnableList, ...incoming];
+				} else {
+					item.serial_no_data = updated_item.serial_no_data;
+				}
 
 				if (
 					item.has_batch_no &&
@@ -283,6 +299,9 @@ export function _applyItemDetailPayload(
 	const currentDoc = context.get_invoice_doc
 		? context.get_invoice_doc()
 		: context.invoice_doc;
+	const isReturnDoc = Boolean(
+		currentDoc?.is_return || (item?.qty ?? 0) < 0,
+	);
 	const lockReturnPricing = Boolean(
 		currentDoc?.is_return && currentDoc?.return_against,
 	);
@@ -337,7 +356,9 @@ export function _applyItemDetailPayload(
 	item.has_serial_no = data.has_serial_no;
 	item.allow_negative_stock = data.allow_negative_stock;
 	if (data.serial_no !== undefined && data.serial_no !== null) {
-		item.serial_no = data.serial_no;
+		if (!isReturnDoc) {
+			item.serial_no = data.serial_no;
+		}
 	}
 	item.batch_no = data.batch_no;
 	item.is_stock_item = data.is_stock_item;
@@ -377,13 +398,47 @@ export function _applyItemDetailPayload(
 	if (data.barcode) item.barcode = data.barcode;
 	if (data.brand) item.brand = data.brand;
 	if (data.batch_no) item.batch_no = data.batch_no;
-	if (data.serial_no_data) item.serial_no_data = data.serial_no_data;
+	if (data.serial_no_data) {
+		if (isReturnDoc && Array.isArray(item.returnable_serial_nos) && item.returnable_serial_nos.length) {
+			const returnableList = item.returnable_serial_nos.map((sn: string) => ({
+				serial_no: sn,
+				warehouse: item.warehouse || context.pos_profile?.warehouse,
+				batch_no: item.batch_no || data.batch_no || null,
+			}));
+			const existingSet = new Set(returnableList.map((r: any) => r.serial_no));
+			const incoming = Array.isArray(data.serial_no_data)
+				? data.serial_no_data.filter((r: any) => !existingSet.has(r?.serial_no))
+				: [];
+			item.serial_no_data = [...returnableList, ...incoming];
+		} else {
+			item.serial_no_data = data.serial_no_data;
+		}
+	} else if (isReturnDoc && Array.isArray(item.returnable_serial_nos) && item.returnable_serial_nos.length) {
+		item.serial_no_data = item.returnable_serial_nos.map((sn: string) => ({
+			serial_no: sn,
+			warehouse: item.warehouse || context.pos_profile?.warehouse,
+			batch_no: item.batch_no || data.batch_no || null,
+		}));
+	}
 	if (data.batch_no_data) item.batch_no_data = data.batch_no_data;
 
 	if (Array.isArray(item.serial_no_selected) && item.serial_no_selected.length) {
 		// Preserve explicit serial selections even when server response omits `serial_no`.
 		item.serial_no = item.serial_no_selected.join("\n");
 		item.serial_no_selected_count = item.serial_no_selected.length;
+	} else if (isReturnDoc && item.serial_no) {
+		const parsed = String(item.serial_no)
+			.split("\n")
+			.map((s) => s.trim())
+			.filter(Boolean);
+		if (parsed.length) {
+			item.serial_no_selected = parsed;
+			item.serial_no_selected_count = parsed.length;
+		}
+	}
+
+	if (isReturnDoc && item.has_serial_no) {
+		item._batch_serial_assignment_source = "manual";
 	}
 
 	if (

@@ -730,9 +730,22 @@ const commitBatchSerialSelection = (selection: {
 }) => {
 	const target = batchSerialTarget.value;
 	if (!target?.posa_row_id) return;
+	const sign = Number(target.qty) < 0 ? -1 : 1;
+	const conversionFactor = Number(target.conversion_factor || 1) || 1;
+	const nonBatchedQty = selection.serials.length > 0 ? sign * (selection.serials.length / conversionFactor) : target.qty;
 	const allocationLines = target.has_batch_no
 		? createBatchAllocationLines(target, selection.allocations, selection.serials)
-		: [{ ...target, serial_no_selected: [...selection.serials] }];
+		: [{
+				...target,
+				qty: nonBatchedQty,
+				stock_qty: sign * selection.serials.length,
+				amount: nonBatchedQty * Number(target.rate || 0),
+				base_amount: nonBatchedQty * Number(target.base_rate ?? target.rate ?? 0),
+				serial_no_selected: [...selection.serials],
+				serial_no: selection.serials.join("\n"),
+				serial_no_selected_count: selection.serials.length,
+				_batch_serial_assignment_source: "manual",
+			}];
 	if (!allocationLines.length) return;
 	const [primaryLine, ...splitLines] = allocationLines;
 	const updated = invoiceStore.updateItemWithTotals(target.posa_row_id, (item: any) => {
@@ -742,6 +755,8 @@ const commitBatchSerialSelection = (selection: {
 		}
 		if (item.has_serial_no) {
 			item.serial_no_selected = [...primaryLine.serial_no_selected];
+			item.serial_no = item.serial_no_selected.join("\n");
+			item.serial_no_selected_count = item.serial_no_selected.length;
 			props.setSerialNo(item);
 		}
 		item._batch_serial_assignment_source = "manual";

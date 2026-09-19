@@ -47,7 +47,7 @@ const getBatchAvailableQuantity = getBatchAvailableStockQty;
 export const validateBatchSerialSelection = (
 	item: any,
 	selection: BatchSerialSelection = {},
-	options: { isReturnInvoice?: boolean } = {},
+	options: { isReturnInvoice?: boolean; allowPartialReturn?: boolean } = {},
 ): BatchSerialValidationIssue[] => {
 	const issues: BatchSerialValidationIssue[] = [];
 	const batchNo = String(selection.batchNo ?? item?.batch_no ?? "").trim();
@@ -69,10 +69,13 @@ export const validateBatchSerialSelection = (
 				});
 			} else {
 				const allocationTotal = getBatchAllocationTotal(allocations);
-				if (
-					Math.abs(allocationTotal - requiredStockQty) >
-					batchAllocationEpsilon
-				) {
+				const allowPartial =
+					Boolean(options.allowPartialReturn) &&
+					Boolean(options.isReturnInvoice || item?.is_return || (item?.qty ?? 0) < 0);
+				const isMismatch = allowPartial
+					? allocationTotal <= 0 || allocationTotal > requiredStockQty + batchAllocationEpsilon
+					: Math.abs(allocationTotal - requiredStockQty) > batchAllocationEpsilon;
+				if (isMismatch) {
 					issues.push({
 						code: "batch_allocation_mismatch",
 						message: `${item.item_name || item.item_code}: allocate ${requiredStockQty} stock unit(s); ${allocationTotal} allocated`,
@@ -160,12 +163,20 @@ export const validateBatchSerialSelection = (
 				message: `Serialized item ${item.item_name || item.item_code} requires a whole-number stock quantity`,
 				item,
 			});
-		} else if (serials.length !== requiredStockQty) {
-			issues.push({
-				code: "serial_count_mismatch",
-				message: `${item.item_name || item.item_code}: select ${requiredStockQty} serial number(s); ${serials.length} selected`,
-				item,
-			});
+		} else {
+			const allowPartial =
+				Boolean(options.allowPartialReturn) &&
+				Boolean(options.isReturnInvoice || item?.is_return || (item?.qty ?? 0) < 0);
+			const isCountMismatch = allowPartial
+				? serials.length <= 0 || serials.length > requiredStockQty
+				: serials.length !== requiredStockQty;
+			if (isCountMismatch) {
+				issues.push({
+					code: "serial_count_mismatch",
+					message: `${item.item_name || item.item_code}: select ${requiredStockQty} serial number(s); ${serials.length} selected`,
+					item,
+				});
+			}
 		}
 
 		if (new Set(serials).size !== serials.length) {
@@ -176,10 +187,33 @@ export const validateBatchSerialSelection = (
 			});
 		}
 
+		const isReturnItem = Boolean(
+			options.isReturnInvoice ||
+			item?.is_return ||
+			(item?.qty ?? 0) < 0
+		);
+		const returnableSerials =
+			isReturnItem &&
+			Array.isArray(item?.returnable_serial_nos) &&
+			item.returnable_serial_nos.length > 0
+				? item.returnable_serial_nos.map((s: any) => String(s).trim()).filter(Boolean)
+				: null;
+
 		const serialRows = Array.isArray(item.serial_no_data)
 			? item.serial_no_data
 			: [];
-		if (serialRows.length) {
+		if (returnableSerials) {
+			const returnableSet = new Set(returnableSerials);
+			for (const serial of serials) {
+				if (!returnableSet.has(serial)) {
+					issues.push({
+						code: "serial_not_returnable",
+						message: `Serial ${serial} does not belong to the original invoice for ${item.item_name || item.item_code}`,
+						item,
+					});
+				}
+			}
+		} else if (serialRows.length) {
 			const bySerial = new Map(
 				serialRows
 					.filter((row: any) => row?.serial_no)

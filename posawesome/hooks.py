@@ -112,6 +112,7 @@ doc_events = {
         "validate": "posawesome.posawesome.api.invoice.validate",
         "before_save": "posawesome.posawesome.api.payment_currency.preserve_multi_currency_payment_amounts",
         "before_submit": "posawesome.posawesome.api.invoice.before_submit",
+        "on_submit": "posawesome.posawesome.overrides.return_serial_batch.sync_return_item_serials_and_batches",
         "before_cancel": "posawesome.posawesome.api.invoice.before_cancel",
         "on_cancel": "posawesome.posawesome.api.invoice.on_cancel",
     },
@@ -119,6 +120,7 @@ doc_events = {
         "validate": "posawesome.posawesome.api.invoice.validate",
         "before_save": "posawesome.posawesome.api.payment_currency.preserve_multi_currency_payment_amounts",
         "before_submit": "posawesome.posawesome.api.invoice.before_submit",
+        "on_submit": "posawesome.posawesome.overrides.return_serial_batch.sync_return_item_serials_and_batches",
         "before_cancel": "posawesome.posawesome.api.invoice.before_cancel",
         "on_cancel": "posawesome.posawesome.api.invoice.on_cancel",
     },
@@ -484,3 +486,9 @@ fixtures = [
 # Permissions for Custom DocTypes
 # --------------------------------
 permissions = []
+
+try:
+    from posawesome.posawesome.overrides.return_serial_batch import apply_return_serial_batch_patch
+    apply_return_serial_batch_patch()
+except Exception:
+    pass

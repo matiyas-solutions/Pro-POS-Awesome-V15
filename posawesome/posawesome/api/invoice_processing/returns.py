@@ -10,6 +10,9 @@ from frappe.utils import (
 )
 from posawesome.posawesome.api.invoice_processing.utils import _get_return_validity_settings
 from posawesome.posawesome.api.utils import log_perf_event
+from posawesome.posawesome.overrides.return_serial_batch import apply_return_serial_batch_patch
+
+apply_return_serial_batch_patch()
 
 
 @frappe.whitelist()
@@ -331,25 +334,87 @@ def get_invoice_for_return(invoice_name, pos_profile=None, doctype="Sales Invoic
         fields=["name"],
     )
 
+    already_returned_serials_by_item = defaultdict(set)
     returned_qty_by_code = defaultdict(float)
     returned_names = [row.name for row in returned_items]
     if returned_names:
+        has_bundle_field = frappe.get_meta(item_doctype).has_field("serial_and_batch_bundle")
+        return_fields = ["item_code", "qty", "serial_no"]
+        if has_bundle_field:
+            return_fields.append("serial_and_batch_bundle")
+
         returned_rows = frappe.get_all(
             item_doctype,
             filters={"parent": ["in", returned_names], "parenttype": doctype},
-            fields=["item_code", "qty"],
+            fields=return_fields,
         )
         for row in returned_rows:
             item_code = row.get("item_code")
             if not item_code:
                 continue
             returned_qty_by_code[item_code] += abs(flt(row.get("qty") or 0))
+            if row.get("serial_no"):
+                for s in str(row.get("serial_no")).split("\n"):
+                    s_clean = s.strip()
+                    if s_clean:
+                        already_returned_serials_by_item[item_code].add(s_clean)
+            elif row.get("serial_and_batch_bundle"):
+                try:
+                    from erpnext.stock.serial_batch_bundle import get_serial_nos
+                    for s in get_serial_nos(row.get("serial_and_batch_bundle")) or []:
+                        s_clean = str(s).strip()
+                        if s_clean:
+                            already_returned_serials_by_item[item_code].add(s_clean)
+                except Exception:
+                    pass
 
     filtered_items = []
     for item in invoice_doc.get("items") or []:
         item_code = item.get("item_code")
         remaining_qty = flt(item.get("qty") or 0) - flt(returned_qty_by_code.get(item_code, 0))
         if remaining_qty > 0:
+            serial_no = item.get("serial_no")
+            bundle = item.get("serial_and_batch_bundle")
+            if not serial_no and bundle:
+                try:
+                    from erpnext.stock.serial_batch_bundle import get_serial_nos
+                    bundle_serials = get_serial_nos(bundle)
+                    if bundle_serials:
+                        serial_no = "\n".join(bundle_serials)
+                except Exception:
+                    pass
+
+            batch_no = item.get("batch_no")
+            if not batch_no and bundle:
+                try:
+                    from erpnext.stock.serial_batch_bundle import get_batches_from_bundle
+                    bundle_batches = get_batches_from_bundle(bundle)
+                    if bundle_batches:
+                        batch_no = next(iter(bundle_batches.keys()))
+                except Exception:
+                    pass
+
+            original_serials = []
+            if serial_no:
+                original_serials = [s.strip() for s in str(serial_no).split("\n") if s.strip()]
+
+            already_returned = already_returned_serials_by_item.get(item_code, set())
+            returnable_serials = [s for s in original_serials if s not in already_returned]
+
+            if original_serials:
+                serial_no = "\n".join(returnable_serials)
+
+            has_serial_no = cint(
+                item.get("has_serial_no")
+                or frappe.get_cached_value("Item", item_code, "has_serial_no")
+                or (1 if returnable_serials else 0)
+            )
+            has_batch_no = cint(
+                item.get("has_batch_no")
+                or frappe.get_cached_value("Item", item_code, "has_batch_no")
+                or (1 if batch_no else 0)
+            )
+
             filtered_items.append(
                 {
                     "name": item.get("name"),
@@ -360,8 +425,11 @@ def get_invoice_for_return(invoice_name, pos_profile=None, doctype="Sales Invoic
                     "stock_uom": item.get("stock_uom"),
                     "conversion_factor": item.get("conversion_factor"),
                     "warehouse": item.get("warehouse"),
-                    "batch_no": item.get("batch_no"),
-                    "serial_no": item.get("serial_no"),
+                    "batch_no": batch_no,
+                    "serial_no": serial_no,
+                    "returnable_serial_nos": returnable_serials,
+                    "has_serial_no": has_serial_no,
+                    "has_batch_no": has_batch_no,
                     "is_free_item": item.get("is_free_item"),
                     "rate": item.get("rate"),
                     "price_list_rate": item.get("price_list_rate"),
@@ -408,13 +476,31 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 
     original_item_qty = {}
 
+    has_bundle_field = frappe.get_meta(item_doctype).has_field("serial_and_batch_bundle")
+    item_fields = ["item_code", "qty", "serial_no"]
+    if has_bundle_field:
+        item_fields.append("serial_and_batch_bundle")
+
     original_items = frappe.get_all(
         item_doctype,
         filters={"parent": original_invoice_name, "parenttype": doctype},
-        fields=["item_code", "qty"],
+        fields=item_fields,
     )
+    original_serials_by_item = defaultdict(set)
     for item in original_items:
         original_item_qty[item.item_code] = original_item_qty.get(item.item_code, 0) + flt(item.qty or 0)
+        if item.get("serial_no"):
+            for s in str(item.get("serial_no")).split("\n"):
+                if s.strip():
+                    original_serials_by_item[item.item_code].add(s.strip())
+        elif item.get("serial_and_batch_bundle"):
+            try:
+                from erpnext.stock.serial_batch_bundle import get_serial_nos
+                for s in get_serial_nos(item.get("serial_and_batch_bundle")) or []:
+                    if str(s).strip():
+                        original_serials_by_item[item.item_code].add(str(s).strip())
+            except Exception:
+                pass
 
     returned_items = frappe.get_all(
         doctype,
@@ -426,16 +512,29 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
         fields=["name"],
     )
 
+    already_returned_serials = defaultdict(set)
     returned_names = [row.name for row in returned_items]
     if returned_names:
         returned_rows = frappe.get_all(
             item_doctype,
             filters={"parent": ["in", returned_names], "parenttype": doctype},
-            fields=["item_code", "qty"],
+            fields=item_fields,
         )
         for item in returned_rows:
             if item.item_code in original_item_qty:
                 original_item_qty[item.item_code] -= abs(flt(item.qty or 0))
+            if item.get("serial_no"):
+                for s in str(item.get("serial_no")).split("\n"):
+                    if s.strip():
+                        already_returned_serials[item.item_code].add(s.strip())
+            elif item.get("serial_and_batch_bundle"):
+                try:
+                    from erpnext.stock.serial_batch_bundle import get_serial_nos
+                    for s in get_serial_nos(item.get("serial_and_batch_bundle")) or []:
+                        if str(s).strip():
+                            already_returned_serials[item.item_code].add(str(s).strip())
+                except Exception:
+                    pass
 
     for item in return_items:
         item_code = item.get("item_code")
@@ -447,5 +546,22 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
                     item_code
                 ),
             }
+
+        item_serials = []
+        if item.get("serial_no"):
+            item_serials = [s.strip() for s in str(item.get("serial_no")).split("\n") if s.strip()]
+        elif item.get("serial_no_selected"):
+            item_serials = [s.strip() for s in item.get("serial_no_selected") if str(s).strip()]
+
+        if item_serials:
+            allowed_serials = original_serials_by_item.get(item_code, set()) - already_returned_serials.get(item_code, set())
+            for sn in item_serials:
+                if sn not in allowed_serials:
+                    return {
+                        "valid": False,
+                        "message": _("Serial number {0} for item {1} does not belong to original invoice or was already returned.").format(
+                            sn, item_code
+                        ),
+                    }
 
     return {"valid": True}

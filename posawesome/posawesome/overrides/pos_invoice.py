@@ -32,3 +32,11 @@ class CustomPOSInvoice(
 
         # No POS Awesome shift - use ERPNext's validation
         super().validate_pos_opening_entry()
+
+    def on_submit(self):
+        super().on_submit()
+        from posawesome.posawesome.overrides.return_serial_batch import (
+            sync_return_item_serials_and_batches,
+        )
+
+        sync_return_item_serials_and_batches(self)
