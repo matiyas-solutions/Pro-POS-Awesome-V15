@@ -293,6 +293,60 @@ export async function load_invoice(
 					},
 				];
 			}
+
+			if (
+				data.is_return &&
+				data.return_against &&
+				(item.serial_no || (Array.isArray(item.returnable_serial_nos) && item.returnable_serial_nos.length > 0))
+			) {
+				if (!item.has_serial_no) item.has_serial_no = 1;
+				item._batch_serial_assignment_source = "manual";
+
+				const returnableList =
+					Array.isArray(item.returnable_serial_nos) &&
+					item.returnable_serial_nos.length > 0
+						? [...item.returnable_serial_nos]
+						: String(item.serial_no || "")
+								.split("\n")
+								.map((s: string) => s.trim())
+								.filter(Boolean);
+				item.returnable_serial_nos = returnableList;
+
+				const serialList = String(item.serial_no || "")
+					.split("\n")
+					.map((s: string) => s.trim())
+					.filter(Boolean);
+				const activeSelection = serialList.length
+					? serialList
+					: returnableList;
+
+				item.serial_no_selected = [...activeSelection];
+				item.serial_no_selected_count = activeSelection.length;
+				item.serial_no = activeSelection.join("\n");
+
+				const seededSerialData = returnableList.map((sn: string) => ({
+					serial_no: sn,
+					batch_no: item.batch_no || null,
+				}));
+
+				if (
+					!Array.isArray(item.serial_no_data) ||
+					item.serial_no_data.length === 0
+				) {
+					item.serial_no_data = seededSerialData;
+				} else {
+					const existingSerials = new Set(
+						item.serial_no_data.map((r: any) =>
+							String(r?.serial_no || "").trim(),
+						),
+					);
+					seededSerialData.forEach((sRow: any) => {
+						if (!existingSerials.has(sRow.serial_no)) {
+							item.serial_no_data.push(sRow);
+						}
+					});
+				}
+			}
 		});
 
 		const manualSnapshots = context._snapshotManualValuesFromDocItems
@@ -463,6 +517,10 @@ export async function load_invoice(
 					}
 				});
 				item.serial_no_selected_count = item.serial_no_selected.length;
+				if (data.is_return) {
+					item.has_serial_no = 1;
+					item._batch_serial_assignment_source = "manual";
+				}
 			}
 		});
 	}

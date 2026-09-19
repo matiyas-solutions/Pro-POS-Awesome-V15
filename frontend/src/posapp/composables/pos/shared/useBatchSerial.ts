@@ -41,7 +41,7 @@ export function useBatchSerial() {
 		}
 
 		const filtered = serials.filter(
-			(serial) => serial?.batch_no === item.batch_no,
+			(serial) => !serial?.batch_no || serial?.batch_no === item.batch_no,
 		);
 		item.filtered_serial_no_data = filtered;
 		return filtered;
@@ -85,9 +85,18 @@ export function useBatchSerial() {
 			const currentAbsStockQty = currentAbsQty * safeConversionFactor;
 			const sign = Number.isFinite(currentQty) && currentQty < 0 ? -1 : 1;
 			if (currentAbsStockQty !== selectedCount) {
-				item.qty = sign * (selectedCount / safeConversionFactor);
-				item.stock_qty = sign * selectedCount;
-				if (context?.forceUpdate) context.forceUpdate();
+				if (currentAbsStockQty > 0 && selectedCount > currentAbsStockQty) {
+					item.serial_no_selected = item.serial_no_selected.slice(
+						0,
+						Math.trunc(currentAbsStockQty),
+					);
+					item.serial_no = item.serial_no_selected.join("\n");
+					item.serial_no_selected_count = item.serial_no_selected.length;
+				} else if (selectedCount > 0) {
+					item.qty = sign * (selectedCount / safeConversionFactor);
+					item.stock_qty = sign * selectedCount;
+					if (context?.forceUpdate) context.forceUpdate();
+				}
 			}
 		};
 

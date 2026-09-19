@@ -32,6 +32,7 @@ export interface ScanProcessorContext {
 	itemAddition: {
 		addItem: (_item: any, _options?: any) => Promise<void>;
 	};
+	cart_items?: Ref<any[]> | ComputedRef<any[]> | any[];
 	barcodeIndex: {
 		ensureBarcodeIndex: () => any;
 		lookupItemByBarcode: (_barcode: string) => any;
@@ -495,6 +496,63 @@ export function useScanProcessor(context: ScanProcessorContext) {
 			}
 		}
 
+		if (isReturnMode()) {
+			const cleanScannedCode = String(scannedCode || "").trim();
+			const rawCart = context.cart_items;
+			const cartItemsList: any[] = rawCart
+				? (Array.isArray(rawCart) ? rawCart : (rawCart.value || []))
+				: [];
+
+			const matchedCartItem = cartItemsList.find((ci: any) => {
+				if (!ci?.has_serial_no) return false;
+				if (Array.isArray(ci.returnable_serial_nos) && ci.returnable_serial_nos.length) {
+					return ci.returnable_serial_nos.some(
+						(sn: string) => String(sn || "").trim().toLowerCase() === cleanScannedCode.toLowerCase(),
+					);
+				}
+				return false;
+			});
+
+			if (matchedCartItem) {
+				const matchedSerial = matchedCartItem.returnable_serial_nos.find(
+					(sn: string) => String(sn || "").trim().toLowerCase() === cleanScannedCode.toLowerCase(),
+				);
+				if (!Array.isArray(matchedCartItem.serial_no_selected)) {
+					matchedCartItem.serial_no_selected = [];
+				}
+				if (matchedCartItem.serial_no_selected.includes(matchedSerial)) {
+					toastStore.show({
+						title: __("This Serial Number {0} has already been selected for return!", [matchedSerial]),
+						color: "warning",
+					});
+					pendingScanCode.value = "";
+					return;
+				}
+				matchedCartItem.serial_no_selected.push(matchedSerial);
+				matchedCartItem.serial_no = matchedCartItem.serial_no_selected.join("\n");
+				matchedCartItem.serial_no_selected_count = matchedCartItem.serial_no_selected.length;
+				matchedCartItem._batch_serial_assignment_source = "manual";
+
+				const cf = Number(matchedCartItem.conversion_factor || 1);
+				const count = matchedCartItem.serial_no_selected.length;
+				matchedCartItem.qty = -Math.abs(count / (cf > 0 ? cf : 1));
+				matchedCartItem.stock_qty = -Math.abs(count);
+
+				if (eventBus && eventBus.emit) {
+					eventBus.emit("update_invoice_totals");
+				}
+				toastStore.show({
+					title: __("Serial {0} selected for return", [matchedSerial]),
+					color: "success",
+				});
+				if (typeof scannerInput?.playScanTone === "function") {
+					scannerInput.playScanTone("success");
+				}
+				pendingScanCode.value = "";
+				return;
+			}
+		}
+
 		// First try to find exact match by processed code using the pre-built index
 		const index = barcodeIndex.ensureBarcodeIndex();
 		// Use barcodeIndex composable methods if available, else local logic
@@ -561,6 +619,17 @@ export function useScanProcessor(context: ScanProcessorContext) {
 
 					const resolved = resolveRes?.message || {};
 					if (resolved?.item_code) {
+						if (isReturnMode() && resolved?.serial_no) {
+							showScanError({
+								message: `${__("Serial number not found on original invoice")}: ${scannedCode}`,
+								code: scannedCode,
+								details: __(
+									"Only serial numbers from the original invoice can be returned.",
+								),
+							});
+							pendingScanCode.value = "";
+							return;
+						}
 						searchCode = String(resolved.item_code);
 						if (resolved?.serial_no) {
 							scanAssignment.serialNo = String(

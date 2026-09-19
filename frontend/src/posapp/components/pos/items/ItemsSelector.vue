@@ -1094,7 +1094,15 @@ const add_item = async (item, optionsOrQty: any = {}) => {
 		const rawTerm = search_input.value || first_search.value;
 		const t = (typeof rawTerm === "string" ? rawTerm : "").trim().toLowerCase();
 		if (t && !item.to_set_serial_no && !item.to_set_batch_no) {
-			if (Array.isArray(item.serial_no_data) && t.includes("pm-")) {
+			if (Array.isArray(item.returnable_serial_nos) && item.returnable_serial_nos.length) {
+				const retMatch = item.returnable_serial_nos.find(
+					(s: any) => String(s || "").trim().toLowerCase() === t,
+				);
+				if (retMatch) {
+					item.to_set_serial_no = retMatch;
+				}
+			}
+			if (!item.to_set_serial_no && Array.isArray(item.serial_no_data)) {
 				const serialMatch = item.serial_no_data.find((s: any) => s?.serial_no?.toLowerCase() === t);
 				if (serialMatch) {
 					item.to_set_serial_no = serialMatch.serial_no;
@@ -1431,6 +1439,7 @@ const scanProcessor = useScanProcessor({
 	customer_price_list,
 	itemDetailFetcher,
 	itemAddition: { addItem: add_item },
+	cart_items: computed(() => invoiceStore.items),
 	barcodeIndex: {
 		lookupItemByBarcode,
 		searchItemsByCode: searchItemsByCodeFn,

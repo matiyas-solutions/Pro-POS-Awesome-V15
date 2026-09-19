@@ -320,11 +320,17 @@
 				</v-card-actions>
 			</v-card>
 		</v-dialog>
+		<ReturnScanDialog
+			v-model="returnScanDialog"
+			:return-doc="loadedReturnDoc"
+			@confirm="handleReturnScanConfirmed"
+		/>
 	</v-row>
 </template>
 
 <script>
 import format, { formatUtils } from "../../../format";
+import ReturnScanDialog from "./ReturnScanDialog.vue";
 import { useInvoiceStore } from "../../../stores/invoiceStore.js";
 import { useUIStore } from "../../../stores/uiStore.js";
 import { computed } from "vue";
@@ -333,6 +339,9 @@ import { useTheme } from "../../../composables/core/useTheme";
 
 export default {
 	mixins: [format],
+	components: {
+		ReturnScanDialog,
+	},
 	setup() {
 		const invoiceStore = useInvoiceStore();
 		const uiStore = useUIStore();
@@ -356,6 +365,8 @@ export default {
 	},
 	data: () => ({
 		invoicesDialog: false,
+		returnScanDialog: false,
+		loadedReturnDoc: null,
 		singleSelect: true,
 		selected: [],
 		dialog_data: [],
@@ -738,91 +749,56 @@ export default {
 					return;
 				}
 
-				const invoice_doc = {};
-				const items = [];
-
-				return_doc.items.forEach((item) => {
-					const new_item = { ...item };
-					// reference original invoice row for backend validation
-					if (return_doc.doctype === "POS Invoice") {
-						new_item.pos_invoice_item = item.name;
-					} else {
-						new_item.sales_invoice_item = item.name;
-					}
-					delete new_item.name;
-
-					// Preserve original pricing and discounts
-					new_item.rate = item.rate;
-					new_item.price_list_rate = item.price_list_rate;
-					new_item.discount_percentage = item.discount_percentage;
-					new_item.discount_amount = item.discount_amount;
-					new_item.is_free_item = item.is_free_item;
-					new_item.net_rate = item.net_rate;
-					new_item.net_amount = item.net_amount > 0 ? item.net_amount * -1 : item.net_amount;
-					new_item.locked_price = true;
-
-					// Make sure quantities are negative for returns
-					new_item.qty = item.qty > 0 ? item.qty * -1 : item.qty;
-					new_item.stock_qty = item.stock_qty > 0 ? item.stock_qty * -1 : item.stock_qty;
-					new_item.amount = item.amount > 0 ? item.amount * -1 : item.amount;
-					items.push(new_item);
-				});
-
-				invoice_doc.items = items;
-				invoice_doc.is_return = 1;
-				invoice_doc.return_against = return_doc.name;
-				invoice_doc.customer = return_doc.customer;
-				invoice_doc.discount_amount = return_doc.discount_amount;
-				invoice_doc.additional_discount_percentage = return_doc.additional_discount_percentage;
-				const normalizeRefundAmount = (value) => {
-					const amount = this.flt(value || 0, this.currency_precision);
-					return amount ? -Math.abs(amount) : 0;
-				};
-				invoice_doc.payments = Array.isArray(return_doc.payments)
-					? return_doc.payments.map((payment) => ({
-							mode_of_payment: payment.mode_of_payment,
-							amount: normalizeRefundAmount(payment.amount),
-							base_amount:
-								payment.base_amount !== undefined
-									? normalizeRefundAmount(payment.base_amount)
-									: payment.base_amount,
-							default: payment.default,
-							account: payment.account,
-							type: payment.type,
-							currency: payment.currency,
-							conversion_rate: payment.conversion_rate,
-						}))
-					: [];
-
-				// Make sure grand_total is negative for returns
-				if (return_doc.grand_total > 0) {
-					invoice_doc.grand_total = return_doc.grand_total * -1;
-				} else {
-					invoice_doc.grand_total = return_doc.grand_total;
-				}
-
-				// Cap on how much of this return may be refunded as cash. The backend
-				// (get_invoice_for_return) computes it authoritatively as
-				// grand_total - outstanding - returns-already-issued; use it directly
-				// so the rule lives in one place. Fall back to grand - outstanding only
-				// if the field is absent (e.g. an older cached payload).
-				const settled =
-					return_doc.posa_refundable_amount != null
-						? return_doc.posa_refundable_amount
-						: (return_doc.grand_total || 0) - (return_doc.outstanding_amount || 0);
-				const originalPaid = this.flt(settled, this.currency_precision);
-				invoice_doc.posa_refundable_amount = originalPaid > 0 ? originalPaid : 0;
-
-				// These fields ensure proper return handling
-				invoice_doc.update_stock = 1;
-				invoice_doc.pos_profile = this.pos_profile.name;
-				invoice_doc.company = this.company;
-
-				const data = { invoice_doc, return_doc };
-
-				this.eventBus.emit("load_return_invoice", data);
-				this.invoicesDialog = false;
+				this.loadedReturnDoc = return_doc;
+				this.returnScanDialog = true;
 			}
+		},
+		handleReturnScanConfirmed({ selectedItems, returnDoc }) {
+			const invoice_doc = {};
+			invoice_doc.items = selectedItems;
+			invoice_doc.is_return = 1;
+			invoice_doc.return_against = returnDoc.name;
+			invoice_doc.customer = returnDoc.customer;
+			invoice_doc.discount_amount = returnDoc.discount_amount;
+			invoice_doc.additional_discount_percentage = returnDoc.additional_discount_percentage;
+			const normalizeRefundAmount = (value) => {
+				const amount = this.flt(value || 0, this.currency_precision);
+				return amount ? -Math.abs(amount) : 0;
+			};
+			invoice_doc.payments = Array.isArray(returnDoc.payments)
+				? returnDoc.payments.map((payment) => ({
+						mode_of_payment: payment.mode_of_payment,
+						amount: normalizeRefundAmount(payment.amount),
+						base_amount:
+							payment.base_amount !== undefined
+								? normalizeRefundAmount(payment.base_amount)
+								: payment.base_amount,
+						default: payment.default,
+						account: payment.account,
+						type: payment.type,
+						currency: payment.currency,
+						conversion_rate: payment.conversion_rate,
+					}))
+				: [];
+
+			const totalAmount = selectedItems.reduce((sum, it) => sum + (Number(it.amount) || 0), 0);
+			invoice_doc.grand_total = totalAmount < 0 ? totalAmount : -Math.abs(totalAmount);
+
+			const settled =
+				returnDoc.posa_refundable_amount != null
+					? returnDoc.posa_refundable_amount
+					: (returnDoc.grand_total || 0) - (returnDoc.outstanding_amount || 0);
+			const originalPaid = this.flt(settled, this.currency_precision);
+			invoice_doc.posa_refundable_amount = originalPaid > 0 ? originalPaid : 0;
+
+			invoice_doc.update_stock = 1;
+			invoice_doc.pos_profile = this.pos_profile.name;
+			invoice_doc.company = this.company;
+
+			const data = { invoice_doc, return_doc: returnDoc };
+			this.eventBus.emit("load_return_invoice", data);
+			this.invoicesDialog = false;
+			this.returnScanDialog = false;
 		},
 	},
 	created: function () {

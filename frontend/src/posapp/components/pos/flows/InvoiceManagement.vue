@@ -1873,6 +1873,11 @@
 			</v-card-actions>
 		</v-card>
 	</v-dialog>
+	<ReturnScanDialog
+		v-model="returnScanDialog"
+		:return-doc="loadedReturnDoc"
+		@confirm="handleReturnScanConfirmed"
+	/>
 </template>
 
 <script>
@@ -1902,6 +1907,7 @@ import {
 import { isOffline } from "../../../../offline/index";
 import { buildInvoicePdfUrl, shouldDownloadPdfForShareError } from "../../../utils/invoiceSharing";
 import DocumentSourceSelector from "../shared/DocumentSourceSelector.vue";
+import ReturnScanDialog from "./ReturnScanDialog.vue";
 import {
 	canDeleteDocumentSourceRecord,
 	commitDocumentFlowAction,
@@ -1922,6 +1928,7 @@ export default {
 	mixins: [format],
 	components: {
 		DocumentSourceSelector,
+		ReturnScanDialog,
 	},
 	setup() {
 		const uiStore = useUIStore();
@@ -1964,6 +1971,8 @@ export default {
 		};
 	},
 	data: () => ({
+		returnScanDialog: false,
+		loadedReturnDoc: null,
 		activeTab: "history",
 		viewMode: "card",
 		loading: false,
@@ -3724,25 +3733,17 @@ export default {
 					});
 					return;
 				}
+				this.loadedReturnDoc = returnDoc;
+				this.returnScanDialog = true;
+			} catch (error) {
+				console.error("Error creating return invoice:", error);
+				this.toastStore.show({ title: __("Unable to prepare return invoice"), color: "error" });
+			}
+		},
+		handleReturnScanConfirmed({ selectedItems, returnDoc }) {
+			try {
 				const invoiceDoc = {
-					items: returnDoc.items.map((item) => {
-						const row = { ...item };
-						if (returnDoc.doctype === "POS Invoice") row.pos_invoice_item = item.name;
-						else row.sales_invoice_item = item.name;
-						delete row.name;
-						row.rate = item.rate;
-						row.price_list_rate = item.price_list_rate;
-						row.discount_percentage = item.discount_percentage;
-						row.discount_amount = item.discount_amount;
-						row.is_free_item = item.is_free_item;
-						row.net_rate = item.net_rate;
-						row.net_amount = item.net_amount > 0 ? item.net_amount * -1 : item.net_amount;
-						row.locked_price = true;
-						row.qty = item.qty > 0 ? item.qty * -1 : item.qty;
-						row.stock_qty = item.stock_qty > 0 ? item.stock_qty * -1 : item.stock_qty;
-						row.amount = item.amount > 0 ? item.amount * -1 : item.amount;
-						return row;
-					}),
+					items: selectedItems,
 					is_return: 1,
 					return_against: returnDoc.name,
 					customer: returnDoc.customer,
@@ -3761,7 +3762,9 @@ export default {
 							}))
 						: [],
 					grand_total:
-						returnDoc.grand_total > 0 ? returnDoc.grand_total * -1 : returnDoc.grand_total,
+						selectedItems.reduce((sum, it) => sum + (Number(it.amount) || 0), 0) < 0
+							? selectedItems.reduce((sum, it) => sum + (Number(it.amount) || 0), 0)
+							: -Math.abs(selectedItems.reduce((sum, it) => sum + (Number(it.amount) || 0), 0)),
 					update_stock: 1,
 					pos_profile: this.posProfile?.name,
 					company: this.posProfile?.company,
@@ -3770,9 +3773,10 @@ export default {
 					invoice_doc: invoiceDoc,
 					return_doc: returnDoc,
 				});
+				this.returnScanDialog = false;
 				this.uiStore.closeInvoiceManagement();
 			} catch (error) {
-				console.error("Error creating return invoice:", error);
+				console.error("Error loading confirmed return items:", error);
 				this.toastStore.show({ title: __("Unable to prepare return invoice"), color: "error" });
 			}
 		},
