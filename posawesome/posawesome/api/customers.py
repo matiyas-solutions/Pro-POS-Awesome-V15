@@ -21,6 +21,17 @@ def _load_json_arg(value):
     return value
 
 
+def _doctype_has_field(doctype, fieldname):
+    try:
+        if hasattr(frappe, "get_meta"):
+            meta = frappe.get_meta(doctype)
+            if meta and hasattr(meta, "has_field"):
+                return bool(meta.has_field(fieldname))
+        return False
+    except Exception:
+        return False
+
+
 def _assert_customer_write_allowed(pos_profile_doc=None, company=None):
     return assert_pos_profile_write_allowed(pos_profile_doc, company=company)
 
@@ -72,12 +83,14 @@ def _customer_matches_search(customer, search_term):
             customer.get("mobile_no"),
             customer.get("email_id"),
             customer.get("tax_id"),
+            customer.get("gstin"),
             "".join(
                 character
                 for character in cstr(customer.get("mobile_no") or "")
                 if character.isdigit()
             ),
             _normalize_tax_id(customer.get("tax_id")),
+            _normalize_tax_id(customer.get("gstin")),
         )
     )
     text_match = all(part in search_text for part in search_parts)
@@ -89,6 +102,7 @@ def _find_duplicate_customer_records(
     mobile_no=None,
     email_id=None,
     tax_id=None,
+    gstin=None,
     exclude_customer=None,
     allow_duplicate_names=False,
 ):
@@ -102,6 +116,8 @@ def _find_duplicate_customer_records(
         checks.append(("email_id", str(email_id).strip().lower()))
     if tax_id:
         checks.append(("tax_id", str(tax_id).strip()))
+    if gstin and _doctype_has_field("Customer", "gstin"):
+        checks.append(("gstin", str(gstin).strip().upper()))
 
     matches = {}
     for fieldname, value in checks:
@@ -110,10 +126,13 @@ def _find_duplicate_customer_records(
         filters = {fieldname: value, "disabled": 0}
         if exclude_customer:
             filters["name"] = ["!=", exclude_customer]
+        fields = ["name", "customer_name", "mobile_no", "email_id", "tax_id"]
+        if _doctype_has_field("Customer", "gstin"):
+            fields.append("gstin")
         for customer in frappe.get_all(
             "Customer",
             filters=filters,
-            fields=["name", "customer_name", "mobile_no", "email_id", "tax_id"],
+            fields=fields,
             limit_page_length=5,
         ):
             customer_name_key = customer.get("name")
@@ -133,6 +152,7 @@ def find_duplicate_customers(
     mobile_no=None,
     email_id=None,
     tax_id=None,
+    gstin=None,
     customer_id=None,
 ):
     pos_profile_doc_obj = _assert_customer_write_allowed(pos_profile_doc, company=company)
@@ -142,6 +162,7 @@ def find_duplicate_customers(
         mobile_no=mobile_no,
         email_id=email_id,
         tax_id=tax_id,
+        gstin=gstin,
         exclude_customer=customer_id,
         allow_duplicate_names=bool(pos_profile.get("posa_allow_duplicate_customer_names")),
     )
@@ -254,22 +275,26 @@ def get_customer_names(pos_profile, limit=None, offset=None, start_after=None, m
         if start_after:
             filters["name"] = [">", start_after]
 
+        fields = [
+            "name",
+            "modified",
+            "mobile_no",
+            "email_id",
+            "tax_id",
+            "customer_name",
+            "loyalty_program",
+            "default_price_list",
+            "customer_group",
+            "territory",
+            "primary_address",
+        ]
+        if _doctype_has_field("Customer", "gstin"):
+            fields.append("gstin")
+
         customers = frappe.get_all(
             "Customer",
             filters=filters,
-            fields=[
-                "name",
-                "modified",
-                "mobile_no",
-                "email_id",
-                "tax_id",
-                "customer_name",
-                "loyalty_program",
-                "default_price_list",
-                "customer_group",
-                "territory",
-                "primary_address",
-            ],
+            fields=fields,
             order_by="name",
             limit_start=None if start_after else offset,
             limit_page_length=limit,
@@ -311,24 +336,28 @@ def search_customers(pos_profile, search_term, limit=200):
         ["mobile_no", "like", f"%{mobile_fragment}%"],
         ["tax_id", "like", f"%{tax_fragment}%"],
     ]
+    fields = [
+        "name",
+        "modified",
+        "mobile_no",
+        "email_id",
+        "tax_id",
+        "customer_name",
+        "loyalty_program",
+        "default_price_list",
+        "customer_group",
+        "territory",
+        "primary_address",
+    ]
+    if _doctype_has_field("Customer", "gstin"):
+        or_filters.append(["gstin", "like", f"%{search_term}%"])
+        fields.append("gstin")
 
     candidates = frappe.get_all(
         "Customer",
         filters=filters,
         or_filters=or_filters,
-        fields=[
-            "name",
-            "modified",
-            "mobile_no",
-            "email_id",
-            "tax_id",
-            "customer_name",
-            "loyalty_program",
-            "default_price_list",
-            "customer_group",
-            "territory",
-            "primary_address",
-        ],
+        fields=fields,
         order_by="name",
         limit_page_length=max(result_limit * 5, 500),
     )
@@ -370,6 +399,8 @@ def get_customer_info(customer=None, company=None):
     res["birthday"] = customer.posa_birthday
     res["gender"] = customer.gender
     res["tax_id"] = customer.tax_id
+    if _doctype_has_field("Customer", "gstin"):
+        res["gstin"] = customer.get("gstin")
     res["posa_discount"] = customer.posa_discount
     res["name"] = customer.name
     res["customer_name"] = customer.customer_name
@@ -445,6 +476,7 @@ def create_customer(
     pos_profile_doc,
     customer_id=None,
     tax_id=None,
+    gstin=None,
     mobile_no=None,
     email_id=None,
     referral_code=None,
@@ -483,6 +515,7 @@ def create_customer(
             mobile_no=mobile_no,
             email_id=email_id,
             tax_id=tax_id,
+            gstin=gstin,
             allow_duplicate_names=bool(pos_profile.get("posa_allow_duplicate_customer_names")),
         )
         if duplicate_customers:
@@ -493,20 +526,22 @@ def create_customer(
                 )
             )
         else:
-            customer = frappe.get_doc(
-                {
-                    "doctype": "Customer",
-                    "customer_name": customer_name,
-                    "posa_referral_company": company,
-                    "tax_id": tax_id,
-                    "mobile_no": mobile_no,
-                    "email_id": email_id,
-                    "posa_referral_code": referral_code,
-                    "posa_birthday": formatted_birthday,
-                    "customer_type": customer_type,
-                    "gender": gender,
-                }
-            )
+            customer_dict = {
+                "doctype": "Customer",
+                "customer_name": customer_name,
+                "posa_referral_company": company,
+                "tax_id": tax_id,
+                "mobile_no": mobile_no,
+                "email_id": email_id,
+                "posa_referral_code": referral_code,
+                "posa_birthday": formatted_birthday,
+                "customer_type": customer_type,
+                "gender": gender,
+            }
+            if _doctype_has_field("Customer", "gstin") and gstin:
+                customer_dict["gstin"] = str(gstin).strip().upper()
+
+            customer = frappe.get_doc(customer_dict)
             if customer_group:
                 customer.customer_group = customer_group
             else:
@@ -518,7 +553,7 @@ def create_customer(
 
             customer.save()
 
-            if address_line1 or city:
+            if address_line1 or city or gstin:
                 args = {
                     "name": f"{customer.customer_name} - Shipping",
                     "doctype": "Customer",
@@ -531,6 +566,7 @@ def create_customer(
                     "country": country or "",
                     "company": company,
                     "pos_profile_doc": pos_profile_doc,
+                    "gstin": gstin,
                 }
                 make_address(json.dumps(args))
 
@@ -539,6 +575,8 @@ def create_customer(
         customer_doc = frappe.get_doc("Customer", customer_id)
         customer_doc.customer_name = customer_name
         customer_doc.tax_id = tax_id
+        if _doctype_has_field("Customer", "gstin") and gstin is not None:
+            customer_doc.gstin = str(gstin).strip().upper() if gstin else ""
         customer_doc.mobile_no = mobile_no
         customer_doc.email_id = email_id
         customer_doc.posa_referral_code = referral_code
@@ -580,9 +618,11 @@ def create_customer(
             address_doc.address_line1 = address_line1 or ""
             address_doc.city = city or ""
             address_doc.country = country or ""
+            if _doctype_has_field("Address", "gstin") and gstin is not None:
+                address_doc.gstin = str(gstin).strip().upper() if gstin else ""
             address_doc.save()
         else:
-            if address_line1 or city:
+            if address_line1 or city or gstin:
                 args = {
                     "name": f"{customer_doc.customer_name} - Shipping",
                     "doctype": "Customer",
@@ -595,6 +635,7 @@ def create_customer(
                     "country": country or "",
                     "company": company,
                     "pos_profile_doc": pos_profile_doc,
+                    "gstin": gstin,
                 }
                 make_address(json.dumps(args))
 
@@ -669,20 +710,22 @@ def make_address(args):
     args = _load_json_arg(args)
     _assert_customer_write_allowed(args.get("pos_profile_doc"), company=args.get("company"))
 
-    address = frappe.get_doc(
-        {
-            "doctype": "Address",
-            "address_title": args.get("name"),
-            "address_line1": args.get("address_line1"),
-            "address_line2": args.get("address_line2"),
-            "city": args.get("city"),
-            "state": args.get("state"),
-            "pincode": args.get("pincode"),
-            "country": args.get("country"),
-            "address_type": "Shipping",
-            "links": [{"link_doctype": args.get("doctype"), "link_name": args.get("customer")}],
-        }
-    ).insert()
+    address_dict = {
+        "doctype": "Address",
+        "address_title": args.get("name"),
+        "address_line1": args.get("address_line1"),
+        "address_line2": args.get("address_line2"),
+        "city": args.get("city"),
+        "state": args.get("state"),
+        "pincode": args.get("pincode"),
+        "country": args.get("country"),
+        "address_type": "Shipping",
+        "links": [{"link_doctype": args.get("doctype"), "link_name": args.get("customer")}],
+    }
+    if _doctype_has_field("Address", "gstin") and args.get("gstin"):
+        address_dict["gstin"] = str(args.get("gstin")).strip().upper()
+
+    address = frappe.get_doc(address_dict).insert()
 
     return address
 

@@ -48,6 +48,18 @@
 								<v-text-field
 									density="compact"
 									color="primary"
+									:label="frappe._('GSTIN')"
+									class="pos-themed-input"
+									hide-details
+									v-model="gstin"
+									maxlength="15"
+									@update:model-value="formatGstinOnInput"
+								></v-text-field>
+							</v-col>
+							<v-col cols="6">
+								<v-text-field
+									density="compact"
+									color="primary"
 									:label="frappe._('Mobile No')"
 									class="pos-themed-input"
 									hide-details
@@ -248,6 +260,7 @@ export default {
 		customer_id: "",
 		customer_name: "",
 		tax_id: "",
+		gstin: "",
 		mobile_no: "",
 		address_line1: "",
 		city: "",
@@ -407,11 +420,17 @@ export default {
 				}, 50);
 			});
 		},
+		formatGstinOnInput() {
+			if (this.gstin) {
+				this.gstin = this.gstin.toUpperCase().trim();
+			}
+		},
 		confirm_close() {
 			// Check if any data has been entered
 			if (
 				this.customer_name ||
 				this.tax_id ||
+				this.gstin ||
 				this.mobile_no ||
 				this.address_line1 ||
 				this.email_id ||
@@ -435,6 +454,7 @@ export default {
 		clear_customer() {
 			this.customer_name = "";
 			this.tax_id = "";
+			this.gstin = "";
 			this.mobile_no = "";
 			this.address_line1 = "";
 			this.city = "";
@@ -588,6 +608,7 @@ export default {
 				customer_id: this.customer_id,
 				customer_name: this.customer_name,
 				tax_id: this.tax_id,
+				gstin: this.gstin ? this.gstin.toUpperCase().trim() : "",
 				mobile_no: this.mobile_no,
 				address_line1: this.address_line1,
 				city: this.city,
@@ -618,6 +639,7 @@ export default {
 							mobile_no: args.mobile_no,
 							email_id: args.email_id,
 							tax_id: args.tax_id,
+							gstin: args.gstin,
 							company: vm.pos_profile.company,
 							pos_profile_doc: JSON.stringify(vm.pos_profile),
 						},
@@ -660,6 +682,7 @@ export default {
 					mobile_no: args.mobile_no,
 					email_id: args.email_id,
 					tax_id: args.tax_id,
+					gstin: args.gstin,
 					primary_address: args.address_line1,
 				});
 				vm.close_dialog();
@@ -687,6 +710,7 @@ export default {
 							mobile_no: args.mobile_no,
 							email_id: args.email_id,
 							tax_id: args.tax_id,
+							gstin: args.gstin,
 							primary_address: args.address_line1,
 						});
 						vm.close_dialog();
@@ -757,6 +781,7 @@ export default {
 							(this.pos_profile && this.pos_profile.posa_default_country) ||
 							"Pakistan";
 						this.tax_id = data.tax_id;
+						this.gstin = data.gstin || "";
 						this.mobile_no = data.mobile_no;
 						this.email_id = data.email_id;
 						this.referral_code = data.referral_code;

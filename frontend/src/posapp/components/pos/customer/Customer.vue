@@ -97,6 +97,9 @@
 						<v-list-item-subtitle v-if="item.raw.tax_id">
 							<div>{{ __("TAX ID") }}: {{ item.raw.tax_id }}</div>
 						</v-list-item-subtitle>
+						<v-list-item-subtitle v-if="item.raw.gstin">
+							<div>{{ __("GSTIN") }}: {{ item.raw.gstin }}</div>
+						</v-list-item-subtitle>
 						<v-list-item-subtitle v-if="item.raw.email_id">
 							<div>{{ __("Email") }}: {{ item.raw.email_id }}</div>
 						</v-list-item-subtitle>

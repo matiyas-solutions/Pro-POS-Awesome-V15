@@ -95,9 +95,13 @@ export function buildCustomerSearchText(
 		customer.mobile_no,
 		customer.email_id,
 		(customer as CustomerSummary & { tax_id?: unknown }).tax_id,
+		(customer as CustomerSummary & { gstin?: unknown }).gstin,
 		normalizeCustomerMobile(customer.mobile_no),
 		normalizeCustomerTaxId(
 			(customer as CustomerSummary & { tax_id?: string }).tax_id,
+		),
+		normalizeCustomerTaxId(
+			(customer as CustomerSummary & { gstin?: string }).gstin,
 		),
 	]
 		.filter((value) => value !== null && value !== undefined)
@@ -141,7 +145,8 @@ export type CustomerDuplicateField =
 	| "customer_name"
 	| "mobile_no"
 	| "email_id"
-	| "tax_id";
+	| "tax_id"
+	| "gstin";
 
 export function normalizeCustomerDuplicateValue(
 	field: CustomerDuplicateField,
@@ -156,7 +161,7 @@ export function normalizeCustomerDuplicateValue(
 	if (field === "customer_name") {
 		return normalized.replace(/\s+/g, " ");
 	}
-	if (field === "tax_id") {
+	if (field === "tax_id" || field === "gstin") {
 		return normalized.replace(/\s+/g, "");
 	}
 	return normalized;
@@ -172,6 +177,7 @@ export function getCustomerDuplicateFields(
 		"mobile_no",
 		"email_id",
 		"tax_id",
+		"gstin",
 	];
 	return fields.filter((field) => {
 		const candidateValue = normalizeCustomerDuplicateValue(
