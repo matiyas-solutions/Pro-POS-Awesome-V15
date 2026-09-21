@@ -279,10 +279,12 @@ export const useCustomersStore = defineStore("customers", () => {
 			getStringField(info, "primary_address") ||
 			getStringField(info, "customer_address");
 		const taxId = getStringField(info, "tax_id");
+		const gstin = getStringField(info, "gstin");
 		if (email) summary.email_id = email;
 		if (mobile) summary.mobile_no = mobile;
 		if (primaryAddress) summary.primary_address = primaryAddress;
 		if (taxId) summary.tax_id = taxId;
+		if (gstin) summary.gstin = gstin;
 
 		if (existingIndex >= 0) {
 			const updated = [...customers.value];

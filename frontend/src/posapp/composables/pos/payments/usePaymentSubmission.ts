@@ -1138,6 +1138,7 @@ export function usePaymentSubmission(options: PaymentSubmissionOptions) {
 		// Online Submission
 		try {
 			await validateStockBeforeOnlineSubmission(doc, profile, type);
+			
 			const intent = { data, invoice: submissionDoc };
 			persistInvoiceIntentJournal(intent);
 			const outboxPersistPromise = enqueueInvoiceOutboxEntry(

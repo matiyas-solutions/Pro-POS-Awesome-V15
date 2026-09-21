@@ -171,6 +171,7 @@ export interface Customer {
   email_id?: string;
   mobile_no?: string;
   tax_id?: string;
+  gstin?: string;
   image?: string;
   primary_address?: string;
   [key: string]: any;
@@ -182,11 +183,14 @@ export interface CustomerSummary {
   email_id?: string;
   mobile_no?: string;
   primary_address?: string;
+  tax_id?: string;
+  gstin?: string;
   [key: string]: any;
 }
 
 export interface StoredCustomer extends CustomerSummary {
   tax_id?: string;
+  gstin?: string;
 }
 
 export type CustomerInfo = Record<string, unknown>;

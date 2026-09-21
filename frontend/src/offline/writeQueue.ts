@@ -233,6 +233,7 @@ function deriveIdempotencyKey(
 			mobile_no: payload?.args?.mobile_no || "",
 			email_id: payload?.args?.email_id || "",
 			tax_id: payload?.args?.tax_id || "",
+			gstin: payload?.args?.gstin || "",
 		};
 		return `customer:${hashString(stableStringify(customerFingerprint))}`;
 	}
