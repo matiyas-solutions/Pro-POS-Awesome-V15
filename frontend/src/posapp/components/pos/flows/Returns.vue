@@ -761,28 +761,38 @@ export default {
 			invoice_doc.customer = returnDoc.customer;
 			invoice_doc.discount_amount = returnDoc.discount_amount;
 			invoice_doc.additional_discount_percentage = returnDoc.additional_discount_percentage;
-			const normalizeRefundAmount = (value) => {
-				const amount = this.flt(value || 0, this.currency_precision);
-				return amount ? -Math.abs(amount) : 0;
-			};
-			invoice_doc.payments = Array.isArray(returnDoc.payments)
-				? returnDoc.payments.map((payment) => ({
-						mode_of_payment: payment.mode_of_payment,
-						amount: normalizeRefundAmount(payment.amount),
-						base_amount:
-							payment.base_amount !== undefined
-								? normalizeRefundAmount(payment.base_amount)
-								: payment.base_amount,
-						default: payment.default,
-						account: payment.account,
-						type: payment.type,
-						currency: payment.currency,
-						conversion_rate: payment.conversion_rate,
-					}))
-				: [];
-
 			const totalAmount = selectedItems.reduce((sum, it) => sum + (Number(it.amount) || 0), 0);
-			invoice_doc.grand_total = totalAmount < 0 ? totalAmount : -Math.abs(totalAmount);
+			const absTotal = Math.abs(totalAmount);
+			invoice_doc.grand_total = totalAmount < 0 ? totalAmount : -absTotal;
+
+			const originalPayments = Array.isArray(returnDoc.payments) ? returnDoc.payments : [];
+			const origTotalPaid = originalPayments.reduce(
+				(sum, p) => sum + Math.abs(Number(p.amount) || 0),
+				0,
+			);
+			const scale =
+				absTotal <= 0.0001 || origTotalPaid <= 0.0001
+					? 0
+					: Math.min(1, absTotal / origTotalPaid);
+
+			invoice_doc.payments = originalPayments.map((payment) => {
+				const scaledAmount = (Number(payment.amount) || 0) * scale;
+				const amount = this.flt(scaledAmount, this.currency_precision);
+				const negAmount = amount ? -Math.abs(amount) : 0;
+				return {
+					mode_of_payment: payment.mode_of_payment,
+					amount: negAmount,
+					base_amount:
+						payment.base_amount !== undefined
+							? negAmount
+							: undefined,
+					default: payment.default,
+					account: payment.account,
+					type: payment.type,
+					currency: payment.currency,
+					conversion_rate: payment.conversion_rate,
+				};
+			});
 
 			const settled =
 				returnDoc.posa_refundable_amount != null

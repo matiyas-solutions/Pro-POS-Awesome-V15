@@ -130,22 +130,38 @@ export const initializePaymentLinesForDialog = (
 
 	const total = toNumber(doc.rounded_total || doc.grand_total);
 	const normalizedTotal = resolveReturnDefaultAmount(doc, total);
+	const absTotal = Math.abs(total);
+
+	if (doc.is_return && absTotal <= 0.0001) {
+		payments.forEach((payment) => {
+			payment.amount = 0;
+			if (payment.base_amount !== undefined) {
+				payment.base_amount = 0;
+			}
+		});
+		return preferredPayment;
+	}
+
 	const existingAmounts = payments.some((payment) =>
 		hasMeaningfulAmount(payment, precision),
 	);
 
 	if (existingAmounts) {
 		if (doc.is_return) {
+			const existingSum = payments.reduce(
+				(sum, p) => sum + Math.abs(toNumber(p.amount)),
+				0,
+			);
+			const scale =
+				existingSum > absTotal + 0.0001 && existingSum > 0
+					? absTotal / existingSum
+					: 1;
 			payments.forEach((payment) => {
-				const amount = toNumber(payment.amount);
-				if (amount > 0) {
-					payment.amount = -Math.abs(amount);
-				}
+				const amount = toNumber(payment.amount) * scale;
+				payment.amount = amount ? -Math.abs(amount) : 0;
 				if (payment.base_amount !== undefined) {
-					const baseAmount = toNumber(payment.base_amount);
-					if (baseAmount > 0) {
-						payment.base_amount = -Math.abs(baseAmount);
-					}
+					const baseAmount = toNumber(payment.base_amount) * scale;
+					payment.base_amount = baseAmount ? -Math.abs(baseAmount) : 0;
 				}
 			});
 		}

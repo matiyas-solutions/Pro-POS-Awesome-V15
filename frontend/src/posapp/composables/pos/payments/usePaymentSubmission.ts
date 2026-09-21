@@ -897,6 +897,20 @@ export function usePaymentSubmission(options: PaymentSubmissionOptions) {
 		if (!doc || !doc.is_return) {
 			return;
 		}
+		const invoiceTotal = Math.abs(
+			Number(doc.rounded_total || doc.grand_total || 0),
+		);
+		if (invoiceTotal <= 0.0001) {
+			if (doc.payments) {
+				doc.payments.forEach((payment: any) => {
+					payment.amount = 0;
+					if (payment.base_amount !== undefined) {
+						payment.base_amount = 0;
+					}
+				});
+			}
+			return;
+		}
 		// Check if any payment amount is set
 		let hasPaymentSet = false;
 		if (doc.payments) {
@@ -996,7 +1010,11 @@ export function usePaymentSubmission(options: PaymentSubmissionOptions) {
 			});
 		}
 
-		if (doc.is_return && totalPayedAmount === 0) {
+		if (
+			doc.is_return &&
+			totalPayedAmount === 0 &&
+			Math.abs(formatFloat(doc.rounded_total || doc.grand_total, prec)) > 0.001
+		) {
 			doc.is_pos = 0;
 		}
 

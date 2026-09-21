@@ -1303,6 +1303,23 @@ def _normalize_return_payment_rows(invoice_doc, conversion_rate=1):
     if not invoice_doc.is_return:
         return
 
+    invoice_total = abs(flt(invoice_doc.rounded_total or invoice_doc.grand_total))
+
+    # If the return invoice has items and grand total is 0 (e.g. returning a zero-rate item),
+    # no refund amount can be collected or paid. All payment amounts must be 0 to comply
+    # with ERPNext's validate_pos rule: abs(paid_amount) + abs(write_off) <= abs(grand_total).
+    # is_pos remains 1 (as in standard ERPNext return invoices).
+    if invoice_doc.get("items") and invoice_total <= 0.001:
+        for payment in invoice_doc.payments or []:
+            payment.amount = 0
+            payment.base_amount = 0
+            if payment.get("posa_payment_currency"):
+                payment.posa_original_amount = 0
+                payment.posa_account_amount = 0
+        invoice_doc.paid_amount = 0
+        invoice_doc.base_paid_amount = 0
+        return
+
     for payment in invoice_doc.payments or []:
         resolved_amount, resolved_base_amount = _resolve_payment_amounts(
             payment,
@@ -1313,6 +1330,19 @@ def _normalize_return_payment_rows(invoice_doc, conversion_rate=1):
         if payment.get("posa_payment_currency"):
             payment.posa_original_amount = -abs(flt(payment.get("posa_original_amount")))
             payment.posa_account_amount = -abs(flt(payment.get("posa_account_amount")))
+
+    # Scale down return payments if they exceed the return invoice total to comply with
+    # ERPNext's validate_pos rule: abs(paid_amount) + abs(write_off) <= abs(grand_total)
+    if invoice_doc.get("items") and invoice_total > 0.001:
+        total_refund = abs(flt(sum(p.amount for p in invoice_doc.payments or [])))
+        if total_refund > invoice_total + 0.001:
+            scale = invoice_total / total_refund if total_refund > 0 else 0
+            for payment in invoice_doc.payments or []:
+                payment.amount = flt(payment.amount * scale, payment.precision("amount"))
+                payment.base_amount = flt(payment.base_amount * scale, payment.precision("base_amount"))
+                if payment.get("posa_payment_currency"):
+                    payment.posa_original_amount = flt(payment.posa_original_amount * scale)
+                    payment.posa_account_amount = flt(payment.posa_account_amount * scale)
 
     invoice_doc.paid_amount = flt(sum(p.amount for p in invoice_doc.payments or []))
     invoice_doc.base_paid_amount = flt(sum(p.base_amount for p in invoice_doc.payments or []))

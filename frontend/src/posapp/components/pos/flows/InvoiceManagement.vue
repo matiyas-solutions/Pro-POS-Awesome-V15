@@ -3742,6 +3742,18 @@ export default {
 		},
 		handleReturnScanConfirmed({ selectedItems, returnDoc }) {
 			try {
+				const totalAmount = selectedItems.reduce((sum, it) => sum + (Number(it.amount) || 0), 0);
+				const absTotal = Math.abs(totalAmount);
+				const originalPayments = Array.isArray(returnDoc.payments) ? returnDoc.payments : [];
+				const origTotalPaid = originalPayments.reduce(
+					(sum, p) => sum + Math.abs(Number(p.amount) || 0),
+					0,
+				);
+				const scale =
+					absTotal <= 0.0001 || origTotalPaid <= 0.0001
+						? 0
+						: Math.min(1, absTotal / origTotalPaid);
+
 				const invoiceDoc = {
 					items: selectedItems,
 					is_return: 1,
@@ -3749,22 +3761,24 @@ export default {
 					customer: returnDoc.customer,
 					discount_amount: returnDoc.discount_amount,
 					additional_discount_percentage: returnDoc.additional_discount_percentage,
-					payments: Array.isArray(returnDoc.payments)
-						? returnDoc.payments.map((payment) => ({
-								mode_of_payment: payment.mode_of_payment,
-								amount: payment.amount,
-								base_amount: payment.base_amount,
-								default: payment.default,
-								account: payment.account,
-								type: payment.type,
-								currency: payment.currency,
-								conversion_rate: payment.conversion_rate,
-							}))
-						: [],
-					grand_total:
-						selectedItems.reduce((sum, it) => sum + (Number(it.amount) || 0), 0) < 0
-							? selectedItems.reduce((sum, it) => sum + (Number(it.amount) || 0), 0)
-							: -Math.abs(selectedItems.reduce((sum, it) => sum + (Number(it.amount) || 0), 0)),
+					payments: originalPayments.map((payment) => {
+						const scaledAmount = (Number(payment.amount) || 0) * scale;
+						const amount = scaledAmount ? -Math.abs(scaledAmount) : 0;
+						return {
+							mode_of_payment: payment.mode_of_payment,
+							amount: amount,
+							base_amount:
+								payment.base_amount !== undefined
+									? amount
+									: undefined,
+							default: payment.default,
+							account: payment.account,
+							type: payment.type,
+							currency: payment.currency,
+							conversion_rate: payment.conversion_rate,
+						};
+					}),
+					grand_total: totalAmount < 0 ? totalAmount : -absTotal,
 					update_stock: 1,
 					pos_profile: this.posProfile?.name,
 					company: this.posProfile?.company,
