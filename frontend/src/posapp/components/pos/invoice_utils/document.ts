@@ -415,18 +415,30 @@ export function get_invoice_doc(context: any) {
 		if (doc.base_net_total > 0)
 			doc.base_net_total = -Math.abs(doc.base_net_total);
 
-		// Ensure payments have negative amounts
+		// Ensure payments have negative amounts (or 0 for zero-rate returns)
 		if (doc.payments && doc.payments.length) {
-			doc.payments.forEach((payment) => {
-				if (payment.amount > 0)
-					payment.amount = -Math.abs(payment.amount);
-				if (payment.base_amount > 0)
-					payment.base_amount = -Math.abs(payment.base_amount);
-				if (payment.posa_original_amount > 0)
-					payment.posa_original_amount = -Math.abs(payment.posa_original_amount);
-				if (payment.posa_account_amount > 0)
-					payment.posa_account_amount = -Math.abs(payment.posa_account_amount);
-			});
+			const returnGrandTotal = Math.abs(
+				flt(doc.rounded_total || doc.grand_total || 0, context.currency_precision),
+			);
+			if (returnGrandTotal <= 0.0001) {
+				doc.payments.forEach((payment) => {
+					payment.amount = 0;
+					payment.base_amount = 0;
+					if (payment.posa_original_amount !== undefined) payment.posa_original_amount = 0;
+					if (payment.posa_account_amount !== undefined) payment.posa_account_amount = 0;
+				});
+			} else {
+				doc.payments.forEach((payment) => {
+					if (payment.amount > 0)
+						payment.amount = -Math.abs(payment.amount);
+					if (payment.base_amount > 0)
+						payment.base_amount = -Math.abs(payment.base_amount);
+					if (payment.posa_original_amount > 0)
+						payment.posa_original_amount = -Math.abs(payment.posa_original_amount);
+					if (payment.posa_account_amount > 0)
+						payment.posa_account_amount = -Math.abs(payment.posa_account_amount);
+				});
+			}
 		}
 	}
 
@@ -696,7 +708,13 @@ export function get_payments(context: any) {
 		Array.isArray(context.invoice_doc?.payments) &&
 		context.invoice_doc.payments.length
 	) {
-		const total_amount = Math.abs(context.subtotal);
+		const invoiceTotal = Math.abs(
+			context.flt(
+				context.subtotal ?? context.Total ?? context.invoice_doc?.grand_total ?? 0,
+				context.currency_precision,
+			),
+		);
+		const total_amount = invoiceTotal;
 		const sourcePayments = context.invoice_doc.payments.filter(
 			(payment) => payment?.mode_of_payment,
 		);
@@ -712,8 +730,26 @@ export function get_payments(context: any) {
 			0,
 		);
 
-		if (sourcePayments.length && sourceTotal > 0 && total_amount > 0) {
-			// const baseCurrency = context.pos_profile.currency; // Unused
+		if (sourcePayments.length) {
+			if (total_amount <= 0.0001 || sourceTotal <= 0.0001) {
+				return sourcePayments.map((payment) => ({
+					mode_of_payment: payment.mode_of_payment,
+					amount: 0,
+					account: payment.account,
+					type: payment.type,
+					default: payment.default,
+					base_amount: 0,
+					posa_payment_currency: payment.posa_payment_currency,
+					posa_original_amount: 0,
+					posa_exchange_rate: payment.posa_exchange_rate,
+					posa_company_exchange_rate: payment.posa_company_exchange_rate,
+					posa_rate_date: payment.posa_rate_date,
+					posa_rate_source: payment.posa_rate_source,
+					posa_account_currency: payment.posa_account_currency,
+					posa_account_amount: 0,
+				}));
+			}
+
 			let remaining_amount = total_amount;
 
 			return sourcePayments.map((payment, index) => {

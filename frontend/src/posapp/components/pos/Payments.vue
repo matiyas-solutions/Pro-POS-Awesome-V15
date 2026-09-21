@@ -1,4 +1,4 @@
-﻿<!-- eslint-disable vue/multi-word-component-names -->
+<!-- eslint-disable vue/multi-word-component-names -->
 <template>
 	<div
 		ref="paymentRoot"
@@ -1392,8 +1392,9 @@ const ensurePaymentLinesInitialized = (doc = invoice_doc.value) => {
 	// honour the current toggle state.
 	if (doc.is_return) {
 		mergeProfilePaymentsIntoReturn(doc);
-		if (is_credit_return.value) {
-			// Credit return: keep every payment row at 0 so it is recorded as a
+		const returnTotal = Math.abs(flt(doc.rounded_total || doc.grand_total, currency_precision.value));
+		if (returnTotal <= 0.0001 || is_credit_return.value) {
+			// Credit return or zero-total return: keep every payment row at 0 so it is recorded as a
 			// credit note that reduces the customer's balance (no cash refund).
 			doc.payments.forEach((payment) => {
 				payment.amount = 0;
@@ -1430,13 +1431,18 @@ const applyReturnCreditDefault = (doc) => {
 	if (!doc || !doc.is_return) {
 		return;
 	}
+	const returnTotal = Math.abs(flt(doc.rounded_total || doc.grand_total, currency_precision.value));
+	if (returnTotal <= 0.0001) {
+		is_credit_return.value = false;
+		is_cashback.value = false;
+		return;
+	}
 	if (!shouldApplyReturnRefundCap(doc)) {
 		is_credit_return.value = false;
 		is_cashback.value = true;
 		return;
 	}
 	const refundable = doc.posa_refundable_amount;
-	const returnTotal = Math.abs(flt(doc.rounded_total || doc.grand_total, currency_precision.value));
 	const shouldCredit = flt(refundable, currency_precision.value) < returnTotal - 0.0001;
 	is_credit_return.value = shouldCredit;
 	is_cashback.value = !shouldCredit;
