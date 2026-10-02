@@ -98,6 +98,7 @@ export function useInvoiceDetails(options: InvoiceDetailsOptions) {
 
 	const addresses = ref<Address[]>([]);
 	const sales_persons = ref<SalesPerson[]>([]);
+	const sales_partners = ref<any[]>([]);
 
 	// Date states
 	const new_delivery_date = ref<string | null>(null);
@@ -289,6 +290,28 @@ export function useInvoiceDetails(options: InvoiceDetailsOptions) {
 		});
 	};
 
+	const get_sales_partners = () => {
+		if (typeof frappe === "undefined") return;
+		frappe.call({
+			method: "frappe.client.get_list",
+			args: {
+				doctype: "Sales Partner",
+				fields: ["name", "partner_name", "referral_code"],
+				limit_page_length: 0,
+			},
+			callback: function (r: any) {
+				if (r.message) {
+					sales_partners.value = r.message.map((sp: any) => ({
+						title: sp.referral_code ? `${sp.partner_name} (${sp.referral_code})` : sp.partner_name,
+						value: sp.name,
+						referral_code: sp.referral_code,
+						name: sp.name,
+					}));
+				}
+			},
+		});
+	};
+
 	// --- Dates Logic ---
 
 	const update_delivery_date = () => {
@@ -401,9 +424,9 @@ export function useInvoiceDetails(options: InvoiceDetailsOptions) {
 			existing ||
 			calculateReturnValidUntil(
 				doc.posting_date ||
-					(typeof frappe !== "undefined"
-						? frappe.datetime.nowdate()
-						: new Date().toISOString().split("T")[0]),
+				(typeof frappe !== "undefined"
+					? frappe.datetime.nowdate()
+					: new Date().toISOString().split("T")[0]),
 			);
 
 		return_valid_upto_date.value = proposedDate;
@@ -436,6 +459,7 @@ export function useInvoiceDetails(options: InvoiceDetailsOptions) {
 	return {
 		addresses,
 		sales_persons,
+		sales_partners,
 		new_delivery_date,
 		new_po_date,
 		new_credit_due_date,
@@ -450,6 +474,7 @@ export function useInvoiceDetails(options: InvoiceDetailsOptions) {
 		addressFilter,
 		normalizeAddress,
 		get_sales_person_names,
+		get_sales_partners,
 		update_delivery_date,
 		update_po_date,
 		update_credit_due_date,

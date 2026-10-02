@@ -11,7 +11,7 @@
 			>
 				<v-data-table
 					:headers="items_headers"
-					:items="pos_offers"
+					:items="visible_pos_offers"
 					:single-expand="singleExpand"
 					v-model:expanded="expanded"
 					show-expand
@@ -126,10 +126,13 @@ export default {
 
 	computed: {
 		offersCount() {
-			return this.pos_offers.length;
+			return this.visible_pos_offers.length;
 		},
 		appliedOffersCount() {
-			return this.pos_offers.filter((el) => !!el.offer_applied).length;
+			return this.visible_pos_offers.filter((el) => !!el.offer_applied).length;
+		},
+		visible_pos_offers() {
+			return (this.pos_offers || []).filter((offer) => !offer.coupon_based);
 		},
 	},
 
@@ -257,7 +260,7 @@ export default {
 						} else if (offer.offer === "Grand Total" && this.discount_percentage_offer_name) {
 							newOffer.offer_applied = false;
 						} else {
-							newOffer.offer_applied = !!offer.auto;
+							newOffer.offer_applied = !!offer.auto || !!offer.coupon_based;
 						}
 					}
 					if (newOffer.offer == "Give Product" && !newOffer.give_item) {
