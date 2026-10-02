@@ -49,7 +49,12 @@
 					hide-default-footer
 				>
 					<template v-slot:item.applied="{ item }">
-						<v-checkbox-btn v-model="item.applied" disabled></v-checkbox-btn>
+						<v-checkbox-btn :model-value="!!item.applied" disabled></v-checkbox-btn>
+					</template>
+					<template v-slot:item.actions="{ item }">
+						<v-btn color="error" size="small" variant="text" @click="removeCoupon([item.coupon])">
+							<v-icon>mdi-delete</v-icon>
+						</v-btn>
 					</template>
 				</v-data-table>
 			</div>
@@ -101,6 +106,7 @@ export default {
 			{ title: __("Type"), value: "type", align: "start" },
 			{ title: __("Offer"), value: "pos_offer", align: "start" },
 			{ title: __("Applied"), value: "applied", align: "start" },
+			{ title: __("Actions"), value: "actions", align: "end", sortable: false },
 		],
 	}),
 
@@ -169,7 +175,7 @@ export default {
 								coupon: coupon.name,
 								coupon_code: coupon.coupon_code,
 								type: coupon.coupon_type,
-								applied: 0,
+								applied: coupon.pos_offer ? 0 : 1,
 								pos_offer: coupon.pos_offer,
 								customer: coupon.customer || vm.customer,
 							});
@@ -202,6 +208,10 @@ export default {
 			if (!this.posa_coupons) return;
 			const offerList = Array.isArray(offers) ? offers : [];
 			this.posa_coupons.forEach((coupon) => {
+				if (!coupon.pos_offer) {
+					coupon.applied = 1;
+					return;
+				}
 				const offer = offerList.find((el) => el.offer_applied && el.coupon == coupon.coupon);
 				if (offer) {
 					coupon.applied = 1;

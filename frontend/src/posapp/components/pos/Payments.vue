@@ -246,6 +246,8 @@
 						<PaymentSelectionFields
 							:sales-persons="sales_persons"
 							:sales-person="sales_person"
+							:sales-partners="sales_partners"
+							:sales-partner="sales_partner"
 							:readonly="readonly"
 							:print-formats="print_formats"
 							:print-format="print_format"
@@ -253,6 +255,7 @@
 								parseBooleanSetting(pos_profile?.posa_allow_select_print_format_in_payments)
 							"
 							@update:sales-person="sales_person = $event"
+							@update:sales-partner="sales_partner = $event"
 							@update:print-format="print_format = $event"
 						/>
 					</section>
@@ -432,6 +435,8 @@ const credit_change = ref(0);
 const loading = ref(false);
 const show_change_dialog = ref(false);
 const sales_person = ref("");
+const sales_partner = ref("");
+const _pending_coupons = ref([]);
 const is_credit_return = ref(false);
 const customer_info = ref("");
 const print_format = ref("");
@@ -804,6 +809,7 @@ const {
 const {
 	addresses,
 	sales_persons,
+	sales_partners,
 	new_delivery_date,
 	new_po_date,
 	new_credit_due_date,
@@ -817,6 +823,7 @@ const {
 	addressFilter,
 	normalizeAddress,
 	get_sales_person_names,
+	get_sales_partners,
 	update_delivery_date,
 	update_po_date,
 	update_credit_due_date,
@@ -1886,6 +1893,7 @@ const submitInvoiceWrapper = async (print, callbackOverrides = {}, options = {})
 				show_change_dialog.value = true;
 				is_credit_return.value = false;
 				sales_person.value = "";
+				sales_partner.value = "";
 			},
 			onFinishNavigation: (clearInvoice) => {
 				finishSubmissionNavigation(clearInvoice);
@@ -2168,6 +2176,12 @@ watch(redeemed_customer_credit, () => {
 watch(sales_person, (newVal) => {
 	if (!invoice_doc.value) return;
 	if (newVal) {
+		if (sales_partner.value) {
+			sales_partner.value = "";
+			if (typeof frappe !== 'undefined' && frappe.show_alert) {
+				frappe.show_alert({message: __("You can only select either a Sales Person or a Sales Partner. Clearing Sales Partner."), indicator: "orange"});
+			}
+		}
 		invoice_doc.value.sales_team = [
 			{
 				sales_person: newVal,
@@ -2177,6 +2191,19 @@ watch(sales_person, (newVal) => {
 	} else {
 		invoice_doc.value.sales_team = [];
 	}
+});
+
+watch(sales_partner, (newVal) => {
+	if (!invoice_doc.value) return;
+	if (newVal) {
+		if (sales_person.value) {
+			sales_person.value = "";
+			if (typeof frappe !== 'undefined' && frappe.show_alert) {
+				frappe.show_alert({message: __("You can only select either a Sales Person or a Sales Partner. Clearing Sales Person."), indicator: "orange"});
+			}
+		}
+	}
+	invoice_doc.value.sales_partner = newVal;
 });
 
 watch(is_credit_sale, (newVal) => {
@@ -2305,6 +2332,30 @@ watch(selectedCustomer, (newCustomer, oldCustomer) => {
 	}
 });
 
+// Helper: try to match pending coupons to a sales partner referral code
+function _tryMatchCouponToPartner() {
+	const coupons = _pending_coupons.value;
+	const partners = sales_partners.value;
+	if (!coupons || !coupons.length || !partners || !partners.length) return;
+	for (const coupon of coupons) {
+		const code = coupon.coupon_code;
+		if (!code) continue;
+		const upperCode = code.toUpperCase();
+		const match = partners.find((sp) => sp.referral_code && sp.referral_code.toUpperCase() === upperCode);
+		if (match) {
+			sales_partner.value = match.value;
+			return;
+		}
+	}
+}
+
+// When sales_partners finish loading from the server, check pending coupons
+watch(sales_partners, (newPartners) => {
+	if (newPartners && newPartners.length) {
+		_tryMatchCouponToPartner();
+	}
+});
+
 // Lifecycle
 onMounted(() => {
 	_shortcutHandlers.value.handlePaymentShortcut = handlePaymentShortcut.bind(this);
@@ -2348,6 +2399,10 @@ onMounted(() => {
 				get_addresses();
 			}
 			get_sales_person_names();
+			get_sales_partners();
+			
+			_pending_coupons.value = doc.posa_coupons || [];
+			_tryMatchCouponToPartner();
 		});
 
 		eventBus.on("register_pos_profile", (data) => {
@@ -2382,6 +2437,11 @@ onMounted(() => {
 			is_credit_return.value = false;
 			return_valid_upto_date.value = null;
 			resetGiftCardState({ clearPayment: true });
+			_pending_coupons.value = [];
+		});
+		eventBus.on("update_invoice_coupons", (coupons) => {
+			_pending_coupons.value = coupons || [];
+			_tryMatchCouponToPartner();
 		});
 	}
 

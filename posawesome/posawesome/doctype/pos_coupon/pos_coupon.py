@@ -85,6 +85,19 @@ class POSCoupon(Document):
 def check_coupon_code(coupon_code, customer=None, company=None):
     res = {"coupon": None}
     if not frappe.db.exists("POS Coupon", {"coupon_code": coupon_code.upper()}):
+        # Check if it's a Sales Partner referral code
+        partner = frappe.db.get_value("Sales Partner", {"referral_code": coupon_code}, "name")
+        if partner:
+            return {
+                "coupon": frappe._dict({
+                    "name": coupon_code.upper(),
+                    "coupon_code": coupon_code.upper(),
+                    "coupon_type": "Promotional",
+                    "pos_offer": "",
+                    "customer": customer
+                }),
+                "msg": "Apply"
+            }
         res["msg"] = _("Sorry, this coupon code not exists")
         return res
 
