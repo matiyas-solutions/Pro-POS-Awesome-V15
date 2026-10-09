@@ -255,36 +255,9 @@ def _build_search_plan(
     )
 
 
-def _collect_searchable_values(row: Dict[str, Any]) -> List[str]:
-    """Return a list of normalised strings used for word filtering."""
-
-    values: List[Any] = [
-        row.get("item_code"),
-        row.get("item_name"),
-        row.get("name"),
-        row.get("description"),
-        row.get("barcode"),
-        row.get("brand"),
-        row.get("item_group"),
-        row.get("retailmind_short_name"),
-        row.get("retailmind_old_pos_pack"),
-        row.get("retailmind_old_pos_company_code"),
-        row.get("retailmind_old_pos_generic_code"),
-        row.get("retailmind_old_pos_generic_name"),
-        row.get("retailmind_old_pos_rack"),
-        row.get("attributes"),
-    ]
-
-    item_attributes = row.get("item_attributes")
-    if isinstance(item_attributes, list):
-        for attr in item_attributes:
-            if isinstance(attr, dict):
-                values.append(attr.get("attribute"))
-                values.append(attr.get("attribute_value"))
-            else:
-                values.append(attr)
-    elif item_attributes:
-        values.append(item_attributes)
+def _collect_exact_searchable_values(row: Dict[str, Any]) -> List[str]:
+    """Return a list of normalised strings used for exact matching."""
+    values: List[Any] = []
 
     for barcode in row.get("item_barcode") or []:
         if isinstance(barcode, dict):
@@ -315,6 +288,44 @@ def _collect_searchable_values(row: Dict[str, Any]) -> List[str]:
     return normalized_values
 
 
+def _collect_searchable_values(row: Dict[str, Any]) -> List[str]:
+    """Return a list of normalised strings used for word filtering."""
+
+    values: List[Any] = [
+        row.get("item_code"),
+        row.get("item_name"),
+        row.get("name"),
+        row.get("description"),
+        row.get("brand"),
+        row.get("item_group"),
+        row.get("retailmind_short_name"),
+        row.get("retailmind_old_pos_pack"),
+        row.get("retailmind_old_pos_company_code"),
+        row.get("retailmind_old_pos_generic_code"),
+        row.get("retailmind_old_pos_generic_name"),
+        row.get("retailmind_old_pos_rack"),
+        row.get("attributes"),
+    ]
+
+    item_attributes = row.get("item_attributes")
+    if isinstance(item_attributes, list):
+        for attr in item_attributes:
+            if isinstance(attr, dict):
+                values.append(attr.get("attribute"))
+                values.append(attr.get("attribute_value"))
+            else:
+                values.append(attr)
+    elif item_attributes:
+        values.append(item_attributes)
+
+    normalized_values: List[str] = []
+    for val in values:
+        normalized = cstr(val).strip()
+        if normalized:
+            normalized_values.append(normalized.lower())
+    return normalized_values
+
+
 def _matches_search_words(row: Dict[str, Any], search_words: Sequence[str], word_filter_active: bool) -> bool:
     """Return True when the given row satisfies the configured word filter."""
 
@@ -322,8 +333,10 @@ def _matches_search_words(row: Dict[str, Any], search_words: Sequence[str], word
         return True
 
     searchable_values = _collect_searchable_values(row)
+    exact_searchable_values = _collect_exact_searchable_values(row)
+
     for word in search_words:
-        if not any(word in value for value in searchable_values):
+        if not any(word in value for value in searchable_values) and not any(word == exact_value for exact_value in exact_searchable_values):
             return False
     return True
 
