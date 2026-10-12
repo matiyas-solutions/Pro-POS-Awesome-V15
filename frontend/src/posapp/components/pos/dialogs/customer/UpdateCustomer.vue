@@ -66,23 +66,24 @@
 									v-model="mobile_no"
 								></v-text-field>
 							</v-col>
-							<v-col cols="12" v-if="!hideNonEssential">
+							<v-col cols="12">
 								<v-text-field
 									density="compact"
 									color="primary"
-									:label="__('Address Line 1')"
+									:label="frappe._('Address Line 1') + ' *'"
 									hide-details
 									class="pos-themed-input"
 									v-model="address_line1"
 								></v-text-field>
 							</v-col>
 
-							<v-col cols="12" sm="6" v-if="!hideNonEssential">
+							<v-col cols="12" sm="6">
 								<v-text-field
 									v-model="city"
-									variant="outlined"
 									density="compact"
-									:label="__('City')"
+									color="primary"
+									:label="frappe._('City') + ' *'"
+									hide-details
 									class="pos-themed-input"
 								></v-text-field>
 							</v-col>
@@ -433,6 +434,7 @@ export default {
 				this.gstin ||
 				this.mobile_no ||
 				this.address_line1 ||
+				this.city ||
 				this.email_id ||
 				this.referral_code ||
 				this.birthday
@@ -538,6 +540,16 @@ export default {
 			const vm = this;
 			if (!this.customer_name) {
 				frappe.throw(__("Customer Name is required"));
+				return;
+			}
+
+			if (!this.address_line1 || !this.address_line1.trim()) {
+				frappe.throw(__("Address Line 1 is required"));
+				return;
+			}
+
+			if (!this.city || !this.city.trim()) {
+				frappe.throw(__("City is required"));
 				return;
 			}
 
@@ -684,6 +696,7 @@ export default {
 					tax_id: args.tax_id,
 					gstin: args.gstin,
 					primary_address: args.address_line1,
+					city: args.city,
 				});
 				vm.close_dialog();
 				return;

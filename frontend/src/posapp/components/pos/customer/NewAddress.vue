@@ -22,7 +22,7 @@
 								<v-text-field
 									density="compact"
 									color="primary"
-									:label="frappe._('Address Line 1')"
+									:label="frappe._('Address Line 1') + ' *'"
 									class="pos-themed-input"
 									hide-details
 									v-model="address.address_line1"
@@ -40,7 +40,7 @@
 							</v-col>
 							<v-col cols="6">
 								<v-text-field
-									:label="__('City')"
+									:label="frappe._('City') + ' *'"
 									density="compact"
 									color="primary"
 									class="pos-themed-input"
@@ -93,6 +93,14 @@ export default {
 
 		submit_dialog() {
 			var vm = this;
+			if (!this.address.address_line1 || !this.address.address_line1.trim()) {
+				frappe.throw(__("Address Line 1 is required"));
+				return;
+			}
+			if (!this.address.city || !this.address.city.trim()) {
+				frappe.throw(__("City is required"));
+				return;
+			}
 			this.address.customer = this.customer;
 			this.address.doctype = "Customer";
 			frappe.call({

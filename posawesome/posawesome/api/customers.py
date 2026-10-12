@@ -509,6 +509,11 @@ def create_customer(
         except Exception:
             frappe.log_error(f"Error formatting birthday: {birthday}", "POS Awesome")
 
+    if not address_line1 or not str(address_line1).strip():
+        frappe.throw(_("Address Line 1 is required"))
+    if not city or not str(city).strip():
+        frappe.throw(_("City is required"))
+
     if method == "create":
         duplicate_customers = _find_duplicate_customer_records(
             customer_name=customer_name,
@@ -553,22 +558,21 @@ def create_customer(
 
             customer.save()
 
-            if address_line1 or city or gstin:
-                args = {
-                    "name": f"{customer.customer_name} - Shipping",
-                    "doctype": "Customer",
-                    "customer": customer.name,
-                    "address_line1": address_line1 or "",
-                    "address_line2": "",
-                    "city": city or "",
-                    "state": "",
-                    "pincode": "",
-                    "country": country or "",
-                    "company": company,
-                    "pos_profile_doc": pos_profile_doc,
-                    "gstin": gstin,
-                }
-                make_address(json.dumps(args))
+            args = {
+                "name": f"{customer.customer_name} - Shipping",
+                "doctype": "Customer",
+                "customer": customer.name,
+                "address_line1": str(address_line1).strip(),
+                "address_line2": "",
+                "city": str(city).strip(),
+                "state": "",
+                "pincode": "",
+                "country": country or "",
+                "company": company,
+                "pos_profile_doc": pos_profile_doc,
+                "gstin": gstin,
+            }
+            make_address(json.dumps(args))
 
             return customer
     elif method == "update":
@@ -615,29 +619,28 @@ def create_customer(
 
         if existing_address_name:
             address_doc = frappe.get_doc("Address", existing_address_name)
-            address_doc.address_line1 = address_line1 or ""
-            address_doc.city = city or ""
+            address_doc.address_line1 = str(address_line1).strip()
+            address_doc.city = str(city).strip()
             address_doc.country = country or ""
             if _doctype_has_field("Address", "gstin") and gstin is not None:
                 address_doc.gstin = str(gstin).strip().upper() if gstin else ""
             address_doc.save()
         else:
-            if address_line1 or city or gstin:
-                args = {
-                    "name": f"{customer_doc.customer_name} - Shipping",
-                    "doctype": "Customer",
-                    "customer": customer_doc.name,
-                    "address_line1": address_line1 or "",
-                    "address_line2": "",
-                    "city": city or "",
-                    "state": "",
-                    "pincode": "",
-                    "country": country or "",
-                    "company": company,
-                    "pos_profile_doc": pos_profile_doc,
-                    "gstin": gstin,
-                }
-                make_address(json.dumps(args))
+            args = {
+                "name": f"{customer_doc.customer_name} - Shipping",
+                "doctype": "Customer",
+                "customer": customer_doc.name,
+                "address_line1": str(address_line1).strip(),
+                "address_line2": "",
+                "city": str(city).strip(),
+                "state": "",
+                "pincode": "",
+                "country": country or "",
+                "company": company,
+                "pos_profile_doc": pos_profile_doc,
+                "gstin": gstin,
+            }
+            make_address(json.dumps(args))
 
         return customer_doc
 
@@ -710,15 +713,20 @@ def make_address(args):
     args = _load_json_arg(args)
     _assert_customer_write_allowed(args.get("pos_profile_doc"), company=args.get("company"))
 
+    if not args.get("address_line1") or not str(args.get("address_line1")).strip():
+        frappe.throw(_("Address Line 1 is required"))
+    if not args.get("city") or not str(args.get("city")).strip():
+        frappe.throw(_("City is required"))
+
     address_dict = {
         "doctype": "Address",
         "address_title": args.get("name"),
-        "address_line1": args.get("address_line1"),
-        "address_line2": args.get("address_line2"),
-        "city": args.get("city"),
-        "state": args.get("state"),
-        "pincode": args.get("pincode"),
-        "country": args.get("country"),
+        "address_line1": str(args.get("address_line1")).strip(),
+        "address_line2": args.get("address_line2") or "",
+        "city": str(args.get("city")).strip(),
+        "state": args.get("state") or "",
+        "pincode": args.get("pincode") or "",
+        "country": args.get("country") or "",
         "address_type": "Shipping",
         "links": [{"link_doctype": args.get("doctype"), "link_name": args.get("customer")}],
     }
