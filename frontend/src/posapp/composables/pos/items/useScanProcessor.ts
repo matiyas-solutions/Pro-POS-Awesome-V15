@@ -630,6 +630,36 @@ export function useScanProcessor(context: ScanProcessorContext) {
 							pendingScanCode.value = "";
 							return;
 						}
+						if (resolved?.serial_no) {
+							const serialStatus = String(resolved.serial_status || "");
+							const serialWarehouse = String(resolved.serial_warehouse || "");
+							const profileWarehouse = String(pos_profile.value?.warehouse || "");
+							if (serialStatus && serialStatus !== "Active") {
+								showScanError({
+									message: __("Serial No {0} is {1}", [resolved.serial_no, __(serialStatus)]),
+									code: scannedCode,
+									details: __(
+										"This serial number is not available for sale. Please scan another serial number.",
+									),
+								});
+								pendingScanCode.value = "";
+								return;
+							}
+							if (serialWarehouse && profileWarehouse && serialWarehouse !== profileWarehouse) {
+								showScanError({
+									message: __("Serial No {0} belongs to warehouse {1}", [
+										resolved.serial_no,
+										serialWarehouse,
+									]),
+									code: scannedCode,
+									details: __("Only serial numbers in warehouse {0} can be sold from this POS.", [
+										profileWarehouse,
+									]),
+								});
+								pendingScanCode.value = "";
+								return;
+							}
+						}
 						searchCode = String(resolved.item_code);
 						if (resolved?.serial_no) {
 							scanAssignment.serialNo = String(
