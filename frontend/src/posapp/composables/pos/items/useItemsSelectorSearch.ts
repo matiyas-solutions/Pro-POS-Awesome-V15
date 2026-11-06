@@ -325,6 +325,52 @@ export const useItemsSelectorSearch = ({
 		if (displayed.length !== 1) return false;
 
 		const item = { ...displayed[0] };
+
+		// Serial items: never let auto-add pick an arbitrary serial. If the term
+		// is one of the item's serials, add exactly that serial; if the item was
+		// only found via a serial lookup (e.g. a Delivered serial that is no
+		// longer in serial_no_data), leave it to the scan pipeline, which
+		// validates the serial and shows a proper error.
+		if (item?.has_serial_no) {
+			const term = String(searchInput).trim().toLowerCase();
+			const serialMatch = Array.isArray(item.serial_no_data)
+				? item.serial_no_data.find(
+						(row: any) =>
+							String(row?.serial_no || "").trim().toLowerCase() === term,
+					)
+				: null;
+			if (serialMatch?.serial_no) {
+				item.to_set_serial_no = serialMatch.serial_no;
+				if (serialMatch.batch_no && item.has_batch_no) {
+					item.to_set_batch_no = serialMatch.batch_no;
+				}
+			} else {
+				const code = String(item.item_code || "").toLowerCase();
+				const name = String(item.item_name || "").toLowerCase();
+				const barcodes = [
+					item.barcode,
+					...(Array.isArray(item.item_barcode)
+						? item.item_barcode.map((b: any) => b?.barcode)
+						: []),
+					...(Array.isArray(item.barcodes) ? item.barcodes : []),
+				].map((b: any) => String(b || "").toLowerCase());
+				if (!code.includes(term) && !name.includes(term) && !barcodes.includes(term)) {
+					// Hand the code to the scan pipeline: it resolves the serial on
+					// the server and shows "Serial No X is Delivered" etc.
+					console.log("[AutoAdd] serial item matched by a non-sellable serial; validating via scan pipeline", term);
+					if (typeof scannerInput?.onBarcodeScanned === "function") {
+						scannerInput.onBarcodeScanned(String(searchInput).trim());
+					}
+					return false;
+				}
+			}
+			// Scanner scans of a serial are handled by the scan pipeline; adding
+			// here too would create a duplicate line with another serial.
+			if (serialMatch && vm.search_from_scanner) {
+				return false;
+			}
+		}
+
 		console.log("[AutoAdd] auto-adding item:", item?.item_code || item);
 		if (typeof addItemToCart === "function") {
 			await addItemToCart(item);

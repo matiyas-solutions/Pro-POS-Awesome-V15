@@ -484,14 +484,19 @@ def search_serial_or_batch_or_barcode_number(search_value, search_serial_no=None
     if search_serial_no:
         serial_data = frappe.db.get_value(
             "Serial No",
-            {"name": search_value, "status": "Active"},
-            ["item_code", "name as serial_no"],
+            {"name": search_value},
+            ["item_code", "name as serial_no", "status", "warehouse"],
             as_dict=True,
         )
         if serial_data:
+            # status/warehouse let the POS reject Delivered/Inactive serials or
+            # serials sitting in another warehouse at scan time, instead of
+            # adding them and failing on submit.
             return {
                 "item_code": serial_data.item_code,
                 "serial_no": serial_data.serial_no,
+                "serial_status": serial_data.status,
+                "serial_warehouse": serial_data.warehouse,
             }
 
     return {}
