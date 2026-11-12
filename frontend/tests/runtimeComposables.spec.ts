@@ -262,4 +262,41 @@ describe("runtime composable lifecycle ownership", () => {
 		expect(runtime.startTimerSync).toHaveBeenCalledTimes(1);
 		expect(runtime.stopTimerSync).toHaveBeenCalledTimes(1);
 	});
+	it("verifies over HTTP instead of going offline on a realtime socket drop", async () => {
+		const handlers: Record<string, () => void> = {};
+		const networkOnline = ref(true);
+		const serverOnline = ref(true);
+		const serverConnecting = ref(false);
+		const internetReachable = ref(true);
+		const checkNetworkConnectivity = vi.fn(async () => undefined);
+		const runtime = useNetworkLifecycle({
+			networkOnline,
+			serverOnline,
+			serverConnecting,
+			internetReachable,
+			realtime: {
+				socket: { connected: true },
+				on: (event: string, handler: () => void) => {
+					handlers[event] = handler;
+				},
+				off: () => undefined,
+			},
+			isManualOffline: () => false,
+			checkNetworkConnectivity,
+		});
+
+		runtime.start();
+		await vi.waitFor(() => expect(serverConnecting.value).toBe(false));
+		checkNetworkConnectivity.mockClear();
+		(window as any).serverOnline = true;
+
+		handlers.disconnect();
+
+		expect(serverOnline.value).toBe(true);
+		expect((window as any).serverOnline).toBe(true);
+		await vi.waitFor(() =>
+			expect(checkNetworkConnectivity).toHaveBeenCalledWith({ forceImmediate: true }),
+		);
+		runtime.stop();
+	});
 });

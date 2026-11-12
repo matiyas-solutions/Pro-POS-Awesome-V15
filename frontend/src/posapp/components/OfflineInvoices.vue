@@ -133,14 +133,47 @@
 									</div>
 								</template>
 
-								<template #item.actions="{ index }">
+								<template #item.status="{ item }">
+									<div class="sync-status-cell">
+										<v-chip
+											size="small"
+											variant="tonal"
+											:color="statusInfo(item).color"
+										>
+											{{ statusInfo(item).label }}
+										</v-chip>
+										<div
+											v-if="item.last_error && isFailed(item)"
+											class="text-caption text-error mt-1 sync-error-text"
+										>
+											{{ item.last_error }}
+										</div>
+									</div>
+								</template>
+
+								<template #item.actions="{ item }">
+									<v-btn
+										v-if="isFailed(item)"
+										icon
+										color="primary"
+										size="small"
+										variant="text"
+										:loading="retryingId === item.queue_id"
+										@click="retryInvoice(item)"
+										:aria-label="__('Retry offline invoice')"
+									>
+										<v-icon size="18">mdi-refresh</v-icon>
+										<v-tooltip activator="parent" location="top">
+											{{ __("Retry Sync") }}
+										</v-tooltip>
+									</v-btn>
 									<v-btn
 										v-if="posProfile.posa_allow_delete_offline_invoice"
 										icon
 										color="error"
 										size="small"
 										variant="text"
-										@click="removeInvoice(index)"
+										@click="removeInvoice(item)"
 										class="delete-btn"
 										:aria-label="__('Delete offline invoice')"
 									>
@@ -159,6 +192,18 @@
 				<v-divider class="footer-divider"></v-divider>
 				<v-card-actions class="dialog-actions-container-revamped">
 					<div class="actions-left-section">
+						<v-btn
+							v-if="failedCount > 0"
+							variant="outlined"
+							color="warning"
+							prepend-icon="mdi-refresh"
+							class="mr-3"
+							size="large"
+							:loading="retryingId === 'all'"
+							@click="retryAllFailed"
+						>
+							{{ __("Retry Failed") }} ({{ failedCount }})
+						</v-btn>
 						<v-btn
 							v-if="invoices.length > 0"
 							variant="elevated"
@@ -196,9 +241,14 @@
 </template>
 
 <script setup>
-import { ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { formatUtils } from "../format";
-import { getOfflineInvoices, deleteOfflineInvoice, getPendingOfflineInvoiceCount } from "../../offline/index";
+import {
+	getOfflineInvoices,
+	deleteOfflineInvoiceById,
+	getPendingOfflineInvoiceCount,
+	requeueFailedOfflineInvoices,
+} from "../../offline/index";
 
 defineOptions({
 	name: "OfflineInvoicesDialog",
@@ -224,28 +274,56 @@ const headers = [
 		title: __("Customer"),
 		value: "customer",
 		align: "start",
-		width: "35%",
+		width: "25%",
 	},
 	{
 		title: __("Date"),
 		value: "posting_date",
 		align: "center",
-		width: "20%",
+		width: "15%",
 	},
 	{
 		title: __("Amount"),
 		value: "grand_total",
 		align: "end",
-		width: "25%",
+		width: "18%",
+	},
+	{
+		title: __("Sync Status"),
+		value: "status",
+		align: "start",
+		width: "27%",
+		sortable: false,
 	},
 	{
 		title: __("Actions"),
 		value: "actions",
 		align: "center",
-		width: "20%",
+		width: "15%",
 		sortable: false,
 	},
 ];
+
+const retryingId = ref(null);
+
+function isFailed(item) {
+	return item?.status === "failed" || item?.status === "dead_letter";
+}
+
+function statusInfo(item) {
+	switch (item?.status) {
+		case "syncing":
+			return { label: __("Syncing"), color: "info" };
+		case "failed":
+			return { label: __("Sync Failed - will retry"), color: "warning" };
+		case "dead_letter":
+			return { label: __("Sync Stopped - press Retry"), color: "error" };
+		default:
+			return { label: __("Waiting to Sync"), color: "grey" };
+	}
+}
+
+const failedCount = computed(() => invoices.value.filter((item) => isFailed(item)).length);
 
 watch(
 	() => props.modelValue,
@@ -257,8 +335,20 @@ watch(
 	},
 );
 
+// Keep statuses current while open (sync runs in the background).
+let refreshTimer = null;
 watch(dialog, (val) => {
 	emit("update:modelValue", val);
+	if (refreshTimer) {
+		clearInterval(refreshTimer);
+		refreshTimer = null;
+	}
+	if (val) {
+		refreshTimer = setInterval(loadInvoices, 2000);
+	}
+});
+onBeforeUnmount(() => {
+	if (refreshTimer) clearInterval(refreshTimer);
 });
 
 function formatCurrency(value, precision) {
@@ -291,17 +381,50 @@ function loadInvoices() {
 	invoices.value = getOfflineInvoices();
 }
 
-async function removeInvoice(index) {
-	if (!props.posProfile.posa_allow_delete_offline_invoice) {
+async function removeInvoice(item) {
+	if (!props.posProfile.posa_allow_delete_offline_invoice || !item?.queue_id) {
 		return;
 	}
-	await deleteOfflineInvoice(index);
+	await deleteOfflineInvoiceById(item.queue_id);
 	loadInvoices();
 	emit("deleted", getPendingOfflineInvoiceCount());
+}
+
+// Re-queue failed invoices and sync. The server recognises an invoice that is
+// already submitted (same client request id), so retrying cannot duplicate it.
+async function retryInvoice(item) {
+	if (!item?.queue_id) return;
+	retryingId.value = item.queue_id;
+	try {
+		await requeueFailedOfflineInvoices([item.queue_id]);
+		loadInvoices();
+		emit("sync-all");
+	} finally {
+		retryingId.value = null;
+	}
+}
+
+async function retryAllFailed() {
+	retryingId.value = "all";
+	try {
+		await requeueFailedOfflineInvoices();
+		loadInvoices();
+		emit("sync-all");
+	} finally {
+		retryingId.value = null;
+	}
 }
 </script>
 
 <style>
+/* Sync status + error reason per offline invoice */
+.sync-error-text {
+	white-space: normal;
+	word-break: break-word;
+	max-width: 320px;
+	line-height: 1.3;
+}
+
 /* ========== REVAMPED OFFLINE INVOICES DIALOG ========== */
 
 /* Main Card Styling */

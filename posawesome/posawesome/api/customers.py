@@ -469,6 +469,36 @@ def get_customer_info(customer=None, company=None):
     return res
 
 
+def _is_leaf_customer_group(group):
+    if not group:
+        return False
+    return frappe.db.get_value("Customer Group", group, "is_group") == 0
+
+
+def _resolve_new_customer_group(customer_group, pos_profile):
+    """Pick a real (non-group) customer group so the customer stays searchable in POS."""
+    if _is_leaf_customer_group(customer_group):
+        return customer_group
+    for row in (pos_profile or {}).get("customer_groups") or []:
+        group = row.get("customer_group") if isinstance(row, dict) else getattr(row, "customer_group", None)
+        if _is_leaf_customer_group(group):
+            return group
+    default_group = frappe.db.get_single_value("Selling Settings", "customer_group")
+    if _is_leaf_customer_group(default_group):
+        return default_group
+    return customer_group or "All Customer Groups"
+
+
+def _existing_customer_response(existing):
+    fields = ["name", "customer_name", "mobile_no", "email_id", "tax_id", "customer_group", "territory"]
+    if _doctype_has_field("Customer", "gstin"):
+        fields.append("gstin")
+    customer = frappe.db.get_value("Customer", existing.get("name"), fields, as_dict=True) or frappe._dict(existing)
+    customer["posa_existing_customer"] = 1
+    customer["matching_fields"] = existing.get("matching_fields") or []
+    return customer
+
+
 @frappe.whitelist()
 def create_customer(
     customer_name,
@@ -519,12 +549,9 @@ def create_customer(
             allow_duplicate_names=bool(pos_profile.get("posa_allow_duplicate_customer_names")),
         )
         if duplicate_customers:
-            existing = duplicate_customers[0]
-            frappe.throw(
-                _("Customer already exists: {0}").format(
-                    existing.get("customer_name") or existing.get("name")
-                )
-            )
+            # Return the existing customer instead of failing so the cashier
+            # (and queued offline customer sync) can continue with it.
+            return _existing_customer_response(duplicate_customers[0])
         else:
             customer_dict = {
                 "doctype": "Customer",
@@ -542,10 +569,7 @@ def create_customer(
                 customer_dict["gstin"] = str(gstin).strip().upper()
 
             customer = frappe.get_doc(customer_dict)
-            if customer_group:
-                customer.customer_group = customer_group
-            else:
-                customer.customer_group = "All Customer Groups"
+            customer.customer_group = _resolve_new_customer_group(customer_group, pos_profile)
             if territory:
                 customer.territory = territory
             else:
