@@ -259,9 +259,21 @@ export function useNetworkLifecycle(options: UseNetworkLifecycleOptions) {
 			setConnecting(false);
 		});
 		registerRealtime("disconnect", () => {
-			options.serverOnline.value = false;
-			(window as any).serverOnline = false;
-			setConnecting(false);
+			// A realtime socket drop alone does not mean the server is
+			// unreachable (socket.io reconnects on its own). Marking offline here
+			// made bills save as "offline" while HTTP was fine. Verify over HTTP;
+			// the check marks offline only if the server really is unreachable.
+			if (options.isManualOffline() || !navigator.onLine) {
+				options.serverOnline.value = false;
+				(window as any).serverOnline = false;
+				setConnecting(false);
+				return;
+			}
+			void runConnectivityCheck({ forceImmediate: true }).catch(
+				(error) => {
+					console.warn("Disconnect network health check failed", error);
+				},
+			);
 		});
 		registerRealtime("connecting", () => {
 			setConnecting(true);

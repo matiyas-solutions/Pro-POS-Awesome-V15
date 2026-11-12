@@ -648,26 +648,9 @@ export default {
 				}
 
 				if (duplicateCustomers.length) {
-					const existing = duplicateCustomers[0];
-					const existingLabel = existing.customer_name || existing.name;
-					const useExisting = window.confirm(
-						__("An existing customer matches these details: {0}. Select it instead?", [
-							existingLabel,
-						]),
-					);
-					if (useExisting) {
-						await customersStore.addOrUpdateCustomer(existing);
-						vm.toastStore.show({
-							title: __("Existing customer selected"),
-							color: "info",
-						});
-						vm.close_dialog();
-					} else {
-						vm.toastStore.show({
-							title: __("Customer was not created. Review the matching details."),
-							color: "warning",
-						});
-					}
+					// The customer already exists (often not visible in search because of
+					// its customer group). Select it so billing can continue.
+					await vm.selectExistingCustomer(duplicateCustomers[0]);
 					return;
 				}
 			}
@@ -693,6 +676,10 @@ export default {
 				method: "posawesome.posawesome.api.customers.create_customer",
 				args: apiArgs,
 				callback: async (r) => {
+					if (!r.exc && r.message?.posa_existing_customer) {
+						await vm.selectExistingCustomer(r.message);
+						return;
+					}
 					if (!r.exc && r.message.name) {
 						let text = __("Customer created successfully.");
 						if (vm.customer_id) {
@@ -723,6 +710,22 @@ export default {
 					}
 				},
 			});
+		},
+		async selectExistingCustomer(existing) {
+			const customersStore = useCustomersStore();
+			const label = existing.customer_name || existing.name;
+			const matchedOn = (existing.matching_fields || [])
+				.map((field) => String(field).replace(/_/g, " "))
+				.join(", ");
+			const { matching_fields, posa_existing_customer, ...customer } = existing;
+			await customersStore.addOrUpdateCustomer(customer);
+			this.toastStore.show({
+				title: matchedOn
+					? __("Customer already exists ({0} matched). Selected: {1}", [matchedOn, label])
+					: __("Customer already exists. Selected: {0}", [label]),
+				color: "info",
+			});
+			this.close_dialog();
 		},
 		onDateSelect() {
 			// Close the menu

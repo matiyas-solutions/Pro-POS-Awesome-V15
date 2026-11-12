@@ -457,4 +457,29 @@ describe("write queue transaction safety", () => {
 		expect(memory.offline_invoices[0]?.status).toBe("pending");
 		expect(memory.offline_invoices[0]?.invoice?.name).toBe("INV-051");
 	});
+	it("requeues failed and dead-lettered invoices so a manual retry can sync them", async () => {
+		const base = {
+			entity_type: "invoice" as const,
+			payload: { invoice: { name: "INV" } },
+			last_attempt_at: "2026-11-11T10:00:00.000Z",
+			last_error: "boom",
+		};
+		const { module, rows } = await loadWriteQueueModule([
+			{ ...base, queue_id: 1, created_at: "2026-11-11T10:00:00.000Z", retry_count: 5, status: "dead_letter", idempotency_key: "invoice:1" },
+			{ ...base, queue_id: 2, created_at: "2026-11-11T10:01:00.000Z", retry_count: 2, status: "failed", idempotency_key: "invoice:2" },
+			{ ...base, queue_id: 3, created_at: "2026-11-11T10:02:00.000Z", retry_count: 0, status: "synced", idempotency_key: "invoice:3" },
+		]);
+
+		const requeued = await module.requeueFailedQueueEntries("invoice", [1]);
+		expect(requeued).toBe(1);
+		expect(rows.find((row) => row.queue_id === 1)).toMatchObject({ status: "pending", retry_count: 0 });
+		expect(rows.find((row) => row.queue_id === 2)?.status).toBe("failed");
+
+		await module.requeueFailedQueueEntries("invoice");
+		expect(rows.find((row) => row.queue_id === 2)).toMatchObject({ status: "pending", retry_count: 0 });
+		expect(rows.find((row) => row.queue_id === 3)?.status).toBe("synced");
+
+		const claimed = await module.claimRetryableQueueEntries("invoice");
+		expect(claimed.map((entry) => entry.queue_id)).toEqual([1, 2]);
+	});
 });

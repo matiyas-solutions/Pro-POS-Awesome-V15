@@ -570,6 +570,48 @@ export async function markWriteQueueEntryFailed(
 	);
 }
 
+/**
+ * Put failed and dead-lettered entries back into the retry queue so a manual
+ * "Retry" can sync them again. Server-side idempotency (client request id)
+ * makes a retry of an already-submitted invoice resolve as synced, not a
+ * duplicate.
+ */
+export async function requeueFailedQueueEntries(
+	entityType: OfflineEntityType,
+	queueIds?: number[],
+) {
+	await ensureOfflineQueueReady();
+	const table = db.table(WRITE_QUEUE_TABLE);
+	const wanted = queueIds?.length ? new Set(queueIds.map(Number)) : null;
+	let requeued = 0;
+
+	await db.transaction("rw", table, async () => {
+		const entries = (await table
+			.where("entity_type")
+			.equals(entityType)
+			.sortBy("created_at")) as OfflineQueueEntry[];
+
+		for (const entry of entries) {
+			if (entry.status !== "failed" && entry.status !== "dead_letter") {
+				continue;
+			}
+			if (wanted && !wanted.has(Number(entry.queue_id))) {
+				continue;
+			}
+			await table.put({
+				...entry,
+				status: "pending",
+				retry_count: 0,
+				next_attempt_at: null,
+			});
+			requeued += 1;
+		}
+	});
+
+	await refreshQueueMemory(entityType);
+	return requeued;
+}
+
 export async function updateQueuedPayloads(
 	entityType: OfflineEntityType,
 	updater: (payload: AnyRecord) => AnyRecord,

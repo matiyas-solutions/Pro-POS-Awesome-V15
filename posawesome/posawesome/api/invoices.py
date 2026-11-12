@@ -250,3 +250,46 @@ def update_invoice_from_order(data):
     """Backward-compatible facade used by order-to-invoice flow."""
 
     return update_invoice(data)
+
+
+@frappe.whitelist()
+def log_offline_sync_failure(
+    client_request_id=None,
+    pos_profile=None,
+    customer=None,
+    posting_date=None,
+    grand_total=None,
+    error=None,
+):
+    """Record an offline invoice that failed to sync, so support can see it in Error Log."""
+    client_request_id = (client_request_id or "")[:140]
+    existing = None
+    if client_request_id:
+        for doctype in ("Sales Invoice", "POS Invoice"):
+            if not frappe.db.has_column(doctype, "posa_client_request_id"):
+                continue
+            row = frappe.db.get_value(
+                doctype,
+                {"posa_client_request_id": client_request_id},
+                ["name", "docstatus"],
+                as_dict=True,
+            )
+            if row:
+                existing = f"{doctype} {row.name} (docstatus {row.docstatus})"
+                break
+
+    message = "\n".join(
+        [
+            f"User: {frappe.session.user}",
+            f"POS Profile: {(pos_profile or '')[:140]}",
+            f"Customer: {(customer or '')[:140]}",
+            f"Posting Date: {(posting_date or '')[:20]}",
+            f"Grand Total: {flt(grand_total)}",
+            f"Client Request ID: {client_request_id}",
+            f"Already in system: {existing or 'No'}",
+            "",
+            f"Error: {(error or '')[:2000]}",
+        ]
+    )
+    frappe.log_error(title="POS Offline Invoice Sync Failed", message=message)
+    return {"logged": True, "existing": existing}

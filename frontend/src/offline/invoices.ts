@@ -12,7 +12,9 @@ import { updateLocalStock } from "./stock";
 import {
 	claimRetryableQueueEntries,
 	clearWriteQueueEntries,
+	deleteWriteQueueEntry,
 	deleteWriteQueueEntryByIndex,
+	requeueFailedQueueEntries,
 	enqueueWriteQueueEntry,
 	getQueuedPayloadCount,
 	getQueuedPayloadSnapshots,
@@ -243,6 +245,72 @@ export async function deleteOfflineInvoice(index: number) {
 	await deleteWriteQueueEntryByIndex(INVOICE_ENTITY, index);
 }
 
+// Delete by queue id: a table row index shifts with paging and sorting, so
+// deleting by index can remove the wrong invoice.
+export async function deleteOfflineInvoiceById(queueId: number) {
+	await deleteWriteQueueEntry(INVOICE_ENTITY, Number(queueId));
+}
+
+// Move failed / stopped invoices back to pending so the next sync retries them.
+export async function requeueFailedOfflineInvoices(queueIds?: number[]) {
+	return requeueFailedQueueEntries(INVOICE_ENTITY, queueIds);
+}
+
+// Record a sync failure on the server (Error Log) so support can see it without
+// visiting the branch. Best effort: never blocks or breaks the sync loop.
+export function readableSyncError(error: unknown): string {
+	if (!error) return "";
+	if (typeof error === "string") return error;
+	const err = error as AnyRecord;
+	const serverMessages = err._server_messages || err.responseJSON?._server_messages;
+	if (serverMessages) {
+		try {
+			const parsed = JSON.parse(serverMessages);
+			const texts = (Array.isArray(parsed) ? parsed : [parsed]).map((row: any) => {
+				try {
+					const obj = typeof row === "string" ? JSON.parse(row) : row;
+					return obj?.message || String(row);
+				} catch {
+					return String(row);
+				}
+			});
+			const joined = texts.join(" | ").replace(/<[^>]*>/g, "").trim();
+			if (joined) return joined;
+		} catch {
+			// fall through
+		}
+	}
+	if (err.message) return String(err.message);
+	if (err.exc_type) return String(err.exc_type);
+	try {
+		return JSON.stringify(err);
+	} catch {
+		return String(err);
+	}
+}
+
+function reportOfflineSyncFailure(queuedInvoice: AnyRecord, error: unknown) {
+	try {
+		const invoice = queuedInvoice?.invoice || {};
+		const message = readableSyncError(error);
+		void Promise.resolve(
+			frappe.call({
+				method: "posawesome.posawesome.api.invoices.log_offline_sync_failure",
+				args: {
+					client_request_id: invoice.posa_client_request_id || "",
+					pos_profile: invoice.pos_profile || "",
+					customer: invoice.customer || "",
+					posting_date: invoice.posting_date || "",
+					grand_total: invoice.rounded_total || invoice.grand_total || 0,
+					error: String(message || "").slice(0, 2000),
+				},
+			}),
+		).catch(() => {});
+	} catch {
+		// Logging must never interfere with syncing.
+	}
+}
+
 export function getPendingOfflineInvoiceCount() {
 	return getQueuedPayloadCount(INVOICE_ENTITY);
 }
@@ -359,10 +427,12 @@ export async function syncOfflineInvoices() {
 						"Failed to save invoice as draft",
 						draftError,
 					);
+					reportOfflineSyncFailure(queuedInvoice, error);
+					// Store the submit error (the real reason) so the cashier sees it.
 					await markWriteQueueEntryFailed(
 						INVOICE_ENTITY,
 						Number(entry.queue_id),
-						draftError,
+						readableSyncError(error) || draftError,
 						entry.last_attempt_at,
 					);
 				}
