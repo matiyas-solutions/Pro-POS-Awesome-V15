@@ -591,7 +591,9 @@ def get_server_usage():
     else:
         try:
 
-            cpu_percent = psutil.cpu_percent(interval=0.5)
+            # Non-blocking: usage since this worker's previous call. A blocking
+            # interval held a web worker for 0.5 s on every poll.
+            cpu_percent = psutil.cpu_percent(interval=None)
             mem = psutil.virtual_memory()
             memory_percent = mem.percent
             memory_total = mem.total

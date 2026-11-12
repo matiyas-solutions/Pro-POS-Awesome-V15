@@ -177,11 +177,46 @@ def _hours_since(value):
     return (now_datetime() - get_datetime(value)).total_seconds() / 3600
 
 
-def _is_closed_invoice(doc):
+def _prefetch_edit_lookups(doctype, names):
+    """Batch the per-invoice lookups used by get_submitted_invoice_edit_metadata.
+
+    Doing them per row was ~50 ms per invoice (amended_from is not indexed), so
+    the POS invoice history took 10-45 s to open.
+    """
+    names = [name for name in names or [] if name]
+    if not names:
+        return {"amended": set(), "returned": set(), "closed": set()}
+    amended = frappe.get_all(
+        doctype,
+        filters={"amended_from": ["in", names], "docstatus": ["!=", 2]},
+        pluck="amended_from",
+    )
+    returned = frappe.get_all(
+        doctype,
+        filters={"return_against": ["in", names], "docstatus": 1},
+        pluck="return_against",
+    )
+    ref_field = "sales_invoice" if doctype == "Sales Invoice" else "pos_invoice"
+    closed = frappe.get_all(
+        "Sales Invoice Reference",
+        filters={
+            "parenttype": "POS Closing Shift",
+            "parentfield": "pos_transactions",
+            "docstatus": 1,
+            ref_field: ["in", names],
+        },
+        pluck=ref_field,
+    )
+    return {"amended": set(amended), "returned": set(returned), "closed": set(closed)}
+
+
+def _is_closed_invoice(doc, lookups=None):
     if _has_column(doc.doctype, "pos_closing_entry") and doc.get("pos_closing_entry"):
         return True
     if doc.doctype == "POS Invoice" and doc.get("consolidated_invoice"):
         return True
+    if lookups is not None:
+        return doc.name in lookups["closed"]
     if frappe.db.exists(
         "Sales Invoice Reference",
         {
@@ -202,7 +237,7 @@ def _has_stored_value_settlement(doc):
     return bool(redemptions)
 
 
-def get_submitted_invoice_edit_metadata(doc):
+def get_submitted_invoice_edit_metadata(doc, lookups=None):
     root_info = _get_root_invoice_info(doc.doctype, doc)
     window_hours = _get_edit_window_hours(doc.get("pos_profile"))
     age_hours = _hours_since(root_info.get("original_creation"))
@@ -221,16 +256,24 @@ def get_submitted_invoice_edit_metadata(doc):
     elif doc.get("return_against"):
         can_edit = False
         reason = _("Credit notes cannot be edited. Use the return workflow.")
-    elif frappe.db.exists(doc.doctype, {"return_against": doc.name, "docstatus": 1}):
+    elif (
+        doc.name in lookups["returned"]
+        if lookups is not None
+        else frappe.db.exists(doc.doctype, {"return_against": doc.name, "docstatus": 1})
+    ):
         can_edit = False
         reason = _("This invoice already has a submitted return or credit note.")
-    elif _get_active_children(doc.doctype, doc.name):
+    elif (
+        doc.name in lookups["amended"]
+        if lookups is not None
+        else _get_active_children(doc.doctype, doc.name)
+    ):
         can_edit = False
         reason = _("This invoice has already been amended. Edit the latest amended invoice.")
     elif age_hours > window_hours:
         can_edit = False
         reason = _("This invoice is outside the {0}-hour edit window.").format(window_hours)
-    elif _is_closed_invoice(doc):
+    elif _is_closed_invoice(doc, lookups):
         can_edit = False
         reason = _("This invoice is already linked to a submitted POS closing shift.")
     elif _has_stored_value_settlement(doc):
@@ -397,10 +440,11 @@ def list_submitted_invoices(
         order_by=order_by,
         limit_page_length=cint(limit_page_length or 0),
     )
+    lookups = _prefetch_edit_lookups(doctype, [row.get("name") for row in rows or []])
     for row in rows or []:
         row["doctype"] = doctype
         doc = frappe._dict(row)
-        row.update(get_submitted_invoice_edit_metadata(doc))
+        row.update(get_submitted_invoice_edit_metadata(doc, lookups))
     return rows
 
 
