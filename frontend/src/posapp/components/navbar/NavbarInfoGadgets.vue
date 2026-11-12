@@ -17,7 +17,9 @@
 					{{ __("System Status") }}
 				</v-card-title>
 				<v-divider></v-divider>
-				<div class="gadgets-row d-flex flex-row pa-4">
+				<!-- Mount gadgets only while the menu is open: they poll the server
+				     (CPU / DB stats) and must not run on every counter all day. -->
+				<div v-if="menu" class="gadgets-row d-flex flex-row pa-4">
 					<!-- Cache Usage (Left) -->
 					<div class="gadget-col">
 						<slot name="cache-usage-meter"></slot>

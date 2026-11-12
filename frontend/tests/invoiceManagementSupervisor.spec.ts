@@ -42,6 +42,31 @@ describe("InvoiceManagement supervisor scope", () => {
 		};
 	});
 
+	it("limits history to a server-side date range (default last 30 days, From/To date when set)", async () => {
+		const methods = (InvoiceManagement as any).methods;
+		const base = {
+			historyDefaultDays: 30,
+			normalizeDate: methods.normalizeDate,
+			historyDefaultFromDate: () => "2026-03-05",
+		};
+		expect(methods.historyServerDateFilter.call({ ...base, historyDateFrom: "", historyDateTo: "" })).toEqual({
+			posting_date: [">=", "2026-03-05"],
+		});
+		expect(
+			methods.historyServerDateFilter.call({ ...base, historyDateFrom: "2025-01-01", historyDateTo: "" }),
+		).toEqual({ posting_date: [">=", "2025-01-01"] });
+		expect(
+			methods.historyServerDateFilter.call({
+				...base,
+				historyDateFrom: "2025-01-01",
+				historyDateTo: "2025-02-01",
+			}),
+		).toEqual({ posting_date: ["between", ["2025-01-01", "2025-02-01"]] });
+
+		const fromDate = methods.historyDefaultFromDate.call({ historyDefaultDays: 30 });
+		expect(fromDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+	});
+
 	it("loads the current profile by default for supervisors until all profiles is selected", async () => {
 		const callMock = (globalThis as any).frappe.call as ReturnType<typeof vi.fn>;
 		callMock.mockResolvedValue({ message: [] });

@@ -175,6 +175,13 @@
 									</v-chip>
 								</v-btn>
 							</div>
+							<div v-if="!historyDateFrom" class="text-caption text-medium-emphasis mb-3">
+								{{
+									__("Showing invoices from the last {0} days. Set a From Date to see older invoices.", [
+										historyDefaultDays,
+									])
+								}}
+							</div>
 
 							<div class="summary-grid mb-4">
 								<div class="summary-tile summary-tile--history">
@@ -1991,6 +1998,8 @@ export default {
 		historyStatus: "All",
 		historyDateFrom: "",
 		historyDateTo: "",
+		historyDefaultDays: 30,
+		historyReloadTimer: null,
 		historyShowRepairCandidatesOnly: false,
 		repairCandidateInvoiceNames: [],
 		repairedChangeAllocationInvoiceNames: [],
@@ -2334,6 +2343,12 @@ export default {
 		filteredHistoryInvoices() {
 			this.resetTabPage("history");
 		},
+		historyDateFrom() {
+			this.scheduleHistoryReload();
+		},
+		historyDateTo() {
+			this.scheduleHistoryReload();
+		},
 		filteredUnpaidInvoices() {
 			this.resetTabPage("partial");
 		},
@@ -2631,6 +2646,29 @@ export default {
 		},
 		isSupervisorScope() {
 			return Boolean(this.currentCashier?.is_supervisor && this.posProfile?.company);
+		},
+		historyDefaultFromDate() {
+			const date = new Date();
+			date.setDate(date.getDate() - this.historyDefaultDays);
+			const pad = (value) => String(value).padStart(2, "0");
+			return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+		},
+		historyServerDateFilter() {
+			const fromDate = this.normalizeDate(this.historyDateFrom) || this.historyDefaultFromDate();
+			const toDate = this.normalizeDate(this.historyDateTo);
+			if (toDate) {
+				return { posting_date: ["between", [fromDate, toDate]] };
+			}
+			return { posting_date: [">=", fromDate] };
+		},
+		scheduleHistoryReload() {
+			if (this.historyReloadTimer) clearTimeout(this.historyReloadTimer);
+			this.historyReloadTimer = setTimeout(() => {
+				this.historyReloadTimer = null;
+				if (this.invoiceManagementDialog && this.activeTab === "history") {
+					this.loadHistory();
+				}
+			}, 400);
 		},
 		buildInvoiceFilters(baseFilters = {}) {
 			const filters = { ...baseFilters, docstatus: 1 };
@@ -3015,7 +3053,12 @@ export default {
 			}
 			this.loading = true;
 			try {
-				const filters = this.buildInvoiceFilters();
+				// Load only the selected date range from the server (default: last
+				// historyDefaultDays days). Loading every invoice made this screen
+				// take 11-45 s and loaded the server on every open.
+				const filters = this.buildInvoiceFilters(
+					typeof this.historyServerDateFilter === "function" ? this.historyServerDateFilter() : {},
+				);
 				const doctypes =
 					typeof this.historyInvoiceDoctypes === "function"
 						? this.historyInvoiceDoctypes()
