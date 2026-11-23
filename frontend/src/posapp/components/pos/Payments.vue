@@ -349,6 +349,7 @@ import {
 	getCachedGiftCardSnapshot,
 	saveGiftCardSnapshot,
 } from "../../../offline/index";
+import { ensureInvoiceClientRequestId } from "../../../offline/idempotency";
 import GiftCardDialog from "./wallet/GiftCardDialog.vue";
 import BelowCostOverrideDialog from "./payments/BelowCostOverrideDialog.vue";
 import {
@@ -1849,6 +1850,25 @@ const scheduleBackgroundStatusCheck = ({
 	}, 10000);
 };
 
+// External payment hooks: other apps (e.g. pinelabs_fin) can push an async
+// function onto window.posawesome_before_submit_payment_hooks to collect a
+// payment on a device (card terminal) before the invoice is submitted. The
+// hook receives { invoice, pos_profile }; throwing aborts the submission.
+// posa_client_request_id is fixed first so the hook and the later
+// "posa:invoice-submit-response" event share the same request id.
+const runBeforeSubmitPaymentHooks = async () => {
+	const hooks = typeof window !== "undefined" ? window.posawesome_before_submit_payment_hooks : null;
+	if (!Array.isArray(hooks) || !hooks.length || !invoice_doc.value) {
+		return;
+	}
+	ensureInvoiceClientRequestId(invoice_doc.value);
+	for (const hook of hooks) {
+		if (typeof hook === "function") {
+			await hook({ invoice: invoice_doc.value, pos_profile: pos_profile.value });
+		}
+	}
+};
+
 // Submission Wrapper
 const submit = async (_event, payment_received = false, print = false) => {
 	await submitInvoiceWrapper(print, undefined, {
@@ -1865,6 +1885,7 @@ const submitInvoiceWrapper = async (print, callbackOverrides = {}, options = {})
 	loading.value = true;
 	try {
 		await validateSubmission(options.paymentReceived || false);
+		await runBeforeSubmitPaymentHooks();
 		const submissionResult = await submitInvoice(print, {
 			onPrint: (doc, printOptions = {}) => {
 				if (print) {
